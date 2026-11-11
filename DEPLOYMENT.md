@@ -38,6 +38,17 @@ For a Render Web Service connected to this repository, use the repository root a
 
 The `--include=dev` flag is required because the build uses Prisma, TypeScript, and their type definitions, even when `NODE_ENV=production` is set. The root `start` script launches the API workspace. The API listens on Render's assigned `PORT` when available, falling back to `API_PORT` and then `4000` for local development. Set `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `JWT_SECRET`, `AI_ENCRYPTION_KEY`, and `WEB_ORIGIN` as Render environment variables; never commit their values.
 
+## 2.2 Render web service
+
+Deploy the Next.js frontend as a separate Render Web Service using the repository root and Node 22:
+
+- Build command: `npm ci --include=dev && npm run build --workspace @jobinfo/web`
+- Start command: `npm run start --workspace @jobinfo/web`
+- Set `NEXT_PUBLIC_API_URL` to the public API service URL and `NEXT_PUBLIC_SITE_URL` to the frontend service URL.
+- Keep the service on the Free plan unless a paid plan is explicitly selected.
+
+The web start command uses Render's assigned `PORT`. Set the API service's `WEB_ORIGIN` to the frontend service URL so browser API requests pass CORS checks.
+
 ## 3. Database migration gate
 
 Do not run `prisma db push` on production. The initial migration `20261111_000000_baseline` creates the current schema on a clean PostgreSQL database; later migrations add query indexes, session controls, and billing referential integrity. Validate the full chain against an empty PostgreSQL 16 database and keep backup/restore rehearsal evidence with the release.
