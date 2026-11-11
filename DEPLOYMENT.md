@@ -28,6 +28,16 @@ npm run doctor:production
 
 The doctor checks required settings and common unsafe defaults. It does not verify that credentials work or that external providers have approved the account.
 
+## 2.1 Render API service
+
+For a Render Web Service connected to this repository, use the repository root as the root directory, Node 22, and:
+
+- Build command: `npm ci && npm run db:generate && npm run build --workspace @jobinfo/database && npm run build --workspace @jobinfo/api`
+- Start command: `npm start`
+- Health check path: `/ready`
+
+The root `start` script launches the API workspace. The API listens on Render's assigned `PORT` when available, falling back to `API_PORT` and then `4000` for local development. Set `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `JWT_SECRET`, `AI_ENCRYPTION_KEY`, and `WEB_ORIGIN` as Render environment variables; never commit their values.
+
 ## 3. Database migration gate
 
 Do not run `prisma db push` on production. The initial migration `20261111_000000_baseline` creates the current schema on a clean PostgreSQL database; later migrations add query indexes, session controls, and billing referential integrity. Validate the full chain against an empty PostgreSQL 16 database and keep backup/restore rehearsal evidence with the release.
