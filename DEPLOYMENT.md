@@ -32,11 +32,11 @@ The doctor checks required settings and common unsafe defaults. It does not veri
 
 For a Render Web Service connected to this repository, use the repository root as the root directory, Node 22, and:
 
-- Build command: `npm ci && npm run db:generate && npm run build --workspace @jobinfo/database && npm run build --workspace @jobinfo/api`
+- Build command: `npm ci --include=dev && npm run db:generate && npm run build --workspace @jobinfo/database && npm run build --workspace @jobinfo/api`
 - Start command: `npm start`
 - Health check path: `/ready`
 
-The root `start` script launches the API workspace. The API listens on Render's assigned `PORT` when available, falling back to `API_PORT` and then `4000` for local development. Set `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `JWT_SECRET`, `AI_ENCRYPTION_KEY`, and `WEB_ORIGIN` as Render environment variables; never commit their values.
+The `--include=dev` flag is required because the build uses Prisma, TypeScript, and their type definitions, even when `NODE_ENV=production` is set. The root `start` script launches the API workspace. The API listens on Render's assigned `PORT` when available, falling back to `API_PORT` and then `4000` for local development. Set `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `JWT_SECRET`, `AI_ENCRYPTION_KEY`, and `WEB_ORIGIN` as Render environment variables; never commit their values.
 
 ## 3. Database migration gate
 
