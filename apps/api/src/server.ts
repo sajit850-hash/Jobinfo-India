@@ -35,6 +35,7 @@ app.use(cookieParser());
 app.use("/api/v1", rateLimit({ windowMs: 15 * 60_000, limit: 300, standardHeaders: true, legacyHeaders: false, handler: (_req, res) => res.status(429).json({ error: "Too many requests. Try again later." }) }));
 app.use("/api/v1/privacy", privacyRouter);
 
+app.get("/", (_req, res) => res.redirect(config.webOrigin));
 app.get("/health", (_req, res) => res.json({ status: "ok", service: "jobinfo-api", timestamp: new Date().toISOString() }));
 app.get("/ready", async (_req, res) => {
   try {
