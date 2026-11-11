@@ -1,0 +1,17 @@
+"use client";
+import { useEffect, useState } from "react";
+import { Page } from "@/components/SiteChrome";
+import { api } from "@/lib/api";
+
+export default function Integrations() {
+  const [endpointUrl, setEndpoint] = useState(""); const [model, setModel] = useState(""); const [apiKey, setApiKey] = useState(""); const [enabled, setEnabled] = useState(false); const [hasKey, setHasKey] = useState(false); const [error, setError] = useState(""); const [notice, setNotice] = useState(""); const [busy, setBusy] = useState(false);
+  type Integration = { configured: boolean; endpointUrl?: string; model?: string; enabled?: boolean; hasApiKey: boolean };
+  useEffect(() => { void api<{integration: Integration}>('/api/v1/admin/integrations/custom-ai').then(r => { if (r.ok && r.data.integration.configured) { setEndpoint(r.data.integration.endpointUrl || ""); setModel(r.data.integration.model || ""); setEnabled(!!r.data.integration.enabled); setHasKey(!!r.data.integration.hasApiKey); } else if (!r.ok) setError(r.data.error || 'Could not load integration settings'); }); }, []);
+  const save = async (e: React.FormEvent) => { e.preventDefault(); setBusy(true); setError(''); setNotice(''); const r = await api<{integration: Integration}>('/api/v1/admin/integrations/custom-ai', { method: 'PUT', body: JSON.stringify({ endpointUrl, model, apiKey: apiKey || undefined, enabled }) }); setBusy(false); if (!r.ok) setError(r.data.error || 'Could not save settings'); else { setHasKey(r.data.integration.hasApiKey); setApiKey(''); setNotice('AI integration settings saved.'); } };
+  const test = async () => { setBusy(true); setError(''); setNotice(''); const r = await api('/api/v1/admin/integrations/custom-ai/test', { method: 'POST' }); setBusy(false); if (!r.ok) setError(r.data.error || 'Connection test failed'); else setNotice('Provider connection succeeded.'); };
+  return <Page><main className="wrap section"><p className="eyebrow">ADMINISTRATION</p><h1>Integration configuration</h1>{error && <div className="err">{error}</div>}{notice && <div className="info">{notice}</div>}
+    <section className="card"><h2>Custom AI API for ATS</h2><p className="muted">Connect an OpenAI-compatible chat completions API. The recruiter ATS uses it to extract job criteria and parse pasted resume text. The API key is encrypted at rest and is never returned to the browser.</p>
+      <form onSubmit={save}><label className="field">Endpoint URL<input type="url" required value={endpointUrl} onChange={e => setEndpoint(e.target.value)} placeholder="https://provider.example/v1" /></label><label className="field">Model<input required value={model} onChange={e => setModel(e.target.value)} placeholder="model-name" /></label><label className="field">API key {hasKey && <span className="muted">(key stored; leave blank to retain it)</span>}<input type="password" autoComplete="new-password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={hasKey ? '••••••••••••' : 'Enter provider API key'} /></label><label className="field" style={{display:'flex',alignItems:'center',gap:10}}><input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} /> Enable custom AI for ATS</label><div className="managedJobActions"><button className="btn" disabled={busy}>{busy ? 'Saving…' : 'Save integration'}</button><button type="button" className="btn outline" disabled={busy || !enabled || !hasKey} onClick={() => void test()}>Test connection</button></div></form>
+    </section>
+  </main></Page>;
+}

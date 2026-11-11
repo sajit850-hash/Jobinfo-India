@@ -1,0 +1,55 @@
+import type { NextFunction, Request, Response } from "express";
+import jwt from "jsonwebtoken";
+import { config } from "./config";
+import { prisma } from "@jobinfo/database";
+
+export type SessionUser = { id: string; role: string; sessionVersion?: number };
+const COOKIE = "ji_session";
+
+export function setSession(res: Response, user: SessionUser) {
+  const token = jwt.sign({ ...user, sessionVersion: user.sessionVersion ?? 0 }, config.jwtSecret, { expiresIn: "7d" });
+  res.cookie(COOKIE, token, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: config.isProd,
+    maxAge: 7 * 24 * 3600 * 1000,
+    path: "/",
+  });
+}
+export const clearSession = (res: Response) => res.clearCookie(COOKIE, { path: "/" });
+
+export function readSession(req: Request): SessionUser | null {
+  const t = req.cookies?.[COOKIE];
+  if (!t) return null;
+  try {
+    const p = jwt.verify(t, config.jwtSecret) as SessionUser;
+    return { id: p.id, role: p.role, sessionVersion: Number(p.sessionVersion || 0) };
+  } catch {
+    return null;
+  }
+}
+
+export function requireAuth(...roles: string[]) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const u = readSession(req);
+    if (!u) return res.status(401).json({ error: "Not signed in" });
+    const current = await prisma.user.findUnique({ where: { id: u.id }, select: { role: true, isActive: true, sessionVersion: true } });
+    if (!current?.isActive || current.sessionVersion !== u.sessionVersion) return res.status(401).json({ error: "Session expired. Sign in again." });
+    if (current.role !== u.role || (roles.length && !roles.includes(current.role))) return res.status(403).json({ error: "Forbidden" });
+    (req as Request & { user: SessionUser }).user = u;
+    next();
+  };
+}
+export const userOf = (req: Request) => (req as Request & { user: SessionUser }).user;
+
+/** Short-lived token proving the holder just registered and must verify OTP. */
+export const signOtpToken = (userId: string) =>
+  jwt.sign({ uid: userId, purpose: "otp" }, config.jwtSecret, { expiresIn: "30m" });
+export function readOtpToken(token: string): string | null {
+  try {
+    const p = jwt.verify(token, config.jwtSecret) as { uid: string; purpose: string };
+    return p.purpose === "otp" ? p.uid : null;
+  } catch {
+    return null;
+  }
+}

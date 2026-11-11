@@ -1,0 +1,13 @@
+"use client";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Page } from "@/components/SiteChrome";
+import { api } from "@/lib/api";
+
+export default function InstitutionApprovals() {
+  const [rows, setRows] = useState<any[]>([]); const [error, setError] = useState(""); const [message, setMessage] = useState(""); const [busy, setBusy] = useState("");
+  const refresh = async () => { const r = await api<{ data: any[] }>("/api/v1/admin/institutions"); if (!r.ok) setError(r.data.error || "Could not load institutions"); else { setRows(r.data.data); setError(""); } };
+  useEffect(() => { void refresh(); }, []);
+  async function verify(row: any, verified: boolean) { setBusy(row.id); setError(""); const r = await api(`/api/v1/admin/institutions/${row.id}/verify`, { method: "PATCH", body: JSON.stringify({ verified }) }); setBusy(""); if (!r.ok) setError(r.data.error || "Could not update verification"); else { setMessage(`${row.name} ${verified ? "approved" : "verification revoked"}.`); void refresh(); } }
+  return <Page><main className="wrap section adminInstitutionPage"><div className="sectionTitle"><div><p className="eyebrow">ADMINISTRATION</p><h1>Institution approvals</h1><p className="muted">Review institution registrations and control whether their opted-in student profiles can be discovered by recruiters.</p></div><Link className="btn outline" href="/admin/dashboard">Admin dashboard</Link></div>{error && <div className="err">{error}</div>}{message && <div className="info">{message}</div>}<div className="applicationList">{rows.map((row) => <article className="card approvalCard" key={row.id}><div><h2>{row.name}</h2><p className="muted">{row.city}, {row.state} · {row.user?.fullName || "Contact unavailable"} · {row.user?.email || ""}</p><p>{row.website && <a className="textLink" href={row.website} target="_blank" rel="noreferrer">{row.website}</a>}</p><small>{row._count.students} students listed</small></div><div className="managedJobActions"><span className={`statusPill ${row.verified ? "status-hired" : "status-pending"}`}>{row.verified ? "Verified" : "Pending review"}</span>{!row.verified ? <button className="btn" disabled={busy === row.id} onClick={() => verify(row, true)}>{busy === row.id ? "Saving…" : "Approve institution"}</button> : <button className="btn outline danger" disabled={busy === row.id} onClick={() => verify(row, false)}>Revoke approval</button>}</div></article>)}{!rows.length && !error && <div className="card emptyState"><h2>No institution registrations</h2><p className="muted">New registrations will appear here for review.</p></div>}</div></main></Page>;
+}

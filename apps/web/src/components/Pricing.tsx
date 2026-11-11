@@ -1,0 +1,11 @@
+"use client";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Plan, corporatePlans, freelancePlans } from "@/lib/plans";
+import { api } from "@/lib/api";
+type PublicPlan={code:string;audience:string;name:string;amountPaise:number;features:string[]};
+function Cards({ plans, href }: { plans: {name:string;amountPaise:number;features:string[];featured?:boolean}[]; href: string }) {
+  return <div className="planGrid">{plans.map((p) => <div key={p.name} className={"plan"+(p.featured?" hot":"")}><span className="planName">{p.name}</span><div className="price">₹{(p.amountPaise/100).toLocaleString("en-IN")}{p.amountPaise>0&&<small> / month + applicable tax</small>}</div><ul>{p.features.map((f)=><li key={f}>✓ {f}</li>)}</ul><Link className={"btn block"+(p.featured?"":" outline")} href={href}>Choose Plan</Link></div>)}</div>;
+}
+function fallback(plans:Plan[]){return plans.map((p)=>({name:p.name,amountPaise:p.price*100,features:p.features,featured:p.featured}));}
+export function Pricing(){const[plans,setPlans]=useState<PublicPlan[]>([]);const[loaded,setLoaded]=useState(false);useEffect(()=>{void api<{data:PublicPlan[]}>('/api/v1/billing/plans').then((r)=>{if(r.ok){setPlans(r.data.data);setLoaded(true);}});},[]);const freelance=loaded?plans.filter((x)=>x.audience==='FREELANCE').map((x)=>({name:x.name,amountPaise:x.amountPaise,features:x.features})):fallback(freelancePlans);const corporate=loaded?plans.filter((x)=>x.audience==='CORPORATE').map((x)=>({name:x.name,amountPaise:x.amountPaise,features:x.features})):fallback(corporatePlans);return <section className="soft" id="pricing"><div className="wrap section"><h2 className="center">Recruiter plans</h2><p className="center muted">Plans and prices are maintained by the Jobinfo India team.</p><h3 className="planHead">Freelance Recruiters <span className="pill">Recruiter profile required</span></h3>{freelance.length?<Cards plans={freelance} href="/recruiter/register?type=freelance"/>:<p className="muted">No freelance plans are currently available.</p>}<h3 className="planHead">Corporate Recruiters <span className="pill">Company profile required</span></h3>{corporate.length?<Cards plans={corporate} href="/recruiter/register?type=corporate"/>:<p className="muted">No corporate plans are currently available.</p>}</div></section>;}

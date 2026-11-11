@@ -1,0 +1,26 @@
+{
+  "name": "jobinfo-india",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run db:generate && npm run build --workspace @jobinfo/database && concurrently \"npm run dev --workspace @jobinfo/api\" \"npm run dev --workspace @jobinfo/web\"",
+    "db:generate": "npm run db:generate --workspace @jobinfo/database",
+    "db:migrate": "npm run db:migrate --workspace @jobinfo/database",
+    "build": "npm run db:generate && npm run build --workspace @jobinfo/database && npm run build --workspace @jobinfo/api && npm run build --workspace @jobinfo/web",
+    "db:seed": "npm run db:seed --workspace @jobinfo/database",
+    "test": "npm run test --workspaces --if-present",
+    "start:web": "npm run start --workspace @jobinfo/web",
+    "start:api": "npm run start --workspace @jobinfo/api",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "doctor": "node scripts/doctor.cjs",
+    "doctor:production": "node scripts/doctor.cjs --production",
+    "smoke": "node scripts/smoke-check.cjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  }
+}
