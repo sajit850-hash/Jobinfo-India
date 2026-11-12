@@ -25,7 +25,7 @@ async function main() {
     prisma.user.count({ where: { email: { endsWith: "@jobinfo-demo.test" }, OR: [{ emailVerifiedAt: null }, { phoneVerifiedAt: null }, { registrationStatus: { not: "REGISTRATION_COMPLETED" } }] } }),
     prisma.user.count({ where: { email: { endsWith: "@jobinfo-demo.test" }, NOT: { phone: { startsWith: "+910" } } } }),
     prisma.institutionStudent.count({ where: { id: { startsWith: "demo-student-" }, NOT: { phone: { startsWith: "+910" } } } }),
-    readFile(path.resolve(process.cwd(), ".local", "demo-credentials.txt"), "utf8"),
+    readFile(path.resolve(process.cwd(), ".local", process.env.DEMO_DATA_ENVIRONMENT === "production" ? "demo-credentials-production.txt" : "demo-credentials.txt"), "utf8"),
   ]);
   const lines = credentials.split(/\r?\n/).filter(line => /@jobinfo-demo\.test\t/.test(line));
   if (lines.length !== 38) throw new Error(`Expected 38 local credential entries, found ${lines.length}`);

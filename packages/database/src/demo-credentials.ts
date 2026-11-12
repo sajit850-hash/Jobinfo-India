@@ -6,7 +6,8 @@ import { prisma } from "./index";
 
 async function main() {
   const staging = process.env.DEMO_DATA_ENVIRONMENT === "staging" && !!process.env.NEON_BRANCH && !/production|main/i.test(process.env.NEON_BRANCH);
-  if (process.env.DEMO_DATA_ENABLED !== "true" || (process.env.NODE_ENV === "production" && !staging)) throw new Error("Credential generation is restricted to development or authorized staging.");
+  const authorizedProduction = process.env.NODE_ENV === "production" && process.env.DEMO_DATA_ENVIRONMENT === "production" && process.env.DEMO_DATA_PRODUCTION_ENABLED === "true" && process.env.NEON_BRANCH === "production";
+  if (process.env.DEMO_DATA_ENABLED !== "true" || (process.env.NODE_ENV === "production" && !staging && !authorizedProduction)) throw new Error("Credential generation requires development, authorized staging, or explicit production opt-in on the production Neon branch.");
   const batchKey = process.env.DEMO_DATA_BATCH_KEY || "jobinfo-demo-v1";
   const batch = await prisma.demoSeedBatch.findUnique({ where: { batchKey } });
   if (!batch || batch.status !== "ACTIVE") throw new Error(`Active demo batch ${batchKey} was not found.`);
@@ -19,7 +20,8 @@ async function main() {
     lines.push(`${user.role}\t${user.id}\t${user.email}\t${password}`);
     return { id: user.id, passwordHash: await bcrypt.hash(password, 12) };
   }));
-  const reportPath = path.resolve(process.cwd(), ".local", "demo-credentials.txt");
+  const reportName = authorizedProduction ? "demo-credentials-production.txt" : "demo-credentials.txt";
+  const reportPath = path.resolve(process.cwd(), ".local", reportName);
   const temporaryPath = `${reportPath}.tmp`;
   await mkdir(path.dirname(reportPath), { recursive: true });
   await writeFile(temporaryPath, lines.join("\n") + "\n", { mode: 0o600 });
@@ -30,6 +32,6 @@ async function main() {
     await rm(temporaryPath, { force: true });
     throw error;
   }
-  console.log(`Generated credentials for ${users.length} tracked demo accounts at packages/database/.local/demo-credentials.txt`);
+  console.log(`Generated credentials for ${users.length} tracked demo accounts at packages/database/.local/${reportName}`);
 }
 main().catch(error => { console.error(error instanceof Error ? error.message : "Credential generation failed"); process.exitCode = 1; }).finally(() => prisma.$disconnect());

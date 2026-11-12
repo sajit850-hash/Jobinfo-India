@@ -2,7 +2,9 @@ import { prisma } from "./index";
 
 const batchKey = process.env.DEMO_DATA_BATCH_KEY || "jobinfo-demo-v1";
 async function main() {
-  if (process.env.DEMO_DATA_ENABLED !== "true" || (process.env.NODE_ENV === "production" && !(process.env.DEMO_DATA_ENVIRONMENT === "staging" && process.env.NEON_BRANCH && !/production|main/i.test(process.env.NEON_BRANCH)))) throw new Error("Demo completion requires an authorized development or staging database.");
+  const staging = process.env.DEMO_DATA_ENVIRONMENT === "staging" && !!process.env.NEON_BRANCH && !/production|main/i.test(process.env.NEON_BRANCH);
+  const authorizedProduction = process.env.NODE_ENV === "production" && process.env.DEMO_DATA_ENVIRONMENT === "production" && process.env.DEMO_DATA_PRODUCTION_ENABLED === "true" && process.env.NEON_BRANCH === "production";
+  if (process.env.DEMO_DATA_ENABLED !== "true" || (process.env.NODE_ENV === "production" && !staging && !authorizedProduction)) throw new Error("Demo completion requires development, authorized staging, or explicit production opt-in on the production Neon branch.");
   const batch = await prisma.demoSeedBatch.findUnique({ where: { batchKey } });
   if (!batch || batch.status !== "ACTIVE") throw new Error(`Active demo batch ${batchKey} was not found.`);
   const mark = (recordType: string, recordId: string, userId?: string) => ({ batchId: batch.id, recordType, recordId, userId });

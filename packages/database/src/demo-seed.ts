@@ -7,10 +7,13 @@ import { prisma } from "./index";
 const batchKeyBase = process.env.DEMO_DATA_BATCH_KEY || "jobinfo-demo-v1";
 let batchKey = batchKeyBase;
 const isStaging = process.env.DEMO_DATA_ENVIRONMENT === "staging" && !!process.env.NEON_BRANCH && !/production|main/i.test(process.env.NEON_BRANCH);
-if (process.env.DEMO_DATA_ENABLED !== "true" || (process.env.NODE_ENV === "production" && !isStaging)) {
-  throw new Error("Demo seeding requires DEMO_DATA_ENABLED=true and development or explicitly authorized staging.");
+const isAuthorizedProduction = process.env.NODE_ENV === "production"
+  && process.env.DEMO_DATA_ENVIRONMENT === "production"
+  && process.env.DEMO_DATA_PRODUCTION_ENABLED === "true"
+  && process.env.NEON_BRANCH === "production";
+if (process.env.DEMO_DATA_ENABLED !== "true" || (process.env.NODE_ENV === "production" && !isStaging && !isAuthorizedProduction)) {
+  throw new Error("Demo seeding requires DEMO_DATA_ENABLED=true and development, authorized staging, or explicit production opt-in on the production Neon branch.");
 }
-if (process.env.NODE_ENV === "production" && !isStaging) throw new Error("Production seed blocked.");
 
 const departments = ["Engineering", "Product", "Data Science", "Business", "Design", "Human Resources"];
 const skills = ["TypeScript", "React", "Node.js", "PostgreSQL", "Python", "SQL", "Figma", "Recruitment", "Digital Marketing", "Excel", "Java", "AWS"];
@@ -37,7 +40,7 @@ async function main() {
   if (existingBatch?.status === "ACTIVE" && existingBatch._count.records) { console.log(`Batch ${batchKey} already contains ${existingBatch._count.records} tracked records; no changes made.`); return; }
   if (existingBatch?.status === "DELETED") { batchKey = `${batchKeyBase}-${new Date().toISOString().replace(/[-:.TZ]/g, "")}`; existingBatch = null; }
   if (process.argv.includes("--dry-run")) { console.log(`Dry run: would create 20 candidates, 10 recruiters, 5 institutions, 3 admins, 5 companies, 50 students, 30 jobs, 40 applications, 20 saved jobs, 15 shortlist statuses, 10 interviews, and 30 notifications in batch ${batchKey}. No database changes made.`); return; }
-  credentialLines = ["Jobinfo India staging demo accounts", `Batch: ${batchKey}`, `Generated: ${new Date().toISOString()}`, "Keep this ignored local file private. Passwords are not stored in the database.", ""];
+  credentialLines = ["Jobinfo India demo accounts", `Batch: ${batchKey}`, `Environment: ${process.env.DEMO_DATA_ENVIRONMENT || "development"}`, `Generated: ${new Date().toISOString()}`, "Keep this ignored local file private. Passwords are not stored in the database.", ""];
   const accountSpecs: { kind: string; count: number; role: "CANDIDATE" | "RECRUITER" | "INSTITUTION" | "ADMIN"; names: string[] }[] = [
     { kind: "candidate", count: 20, role: "CANDIDATE", names },
     { kind: "recruiter", count: 10, role: "RECRUITER", names: ["Kavya Rao", "Rohan Mehta", "Nisha Shah", "Anil Menon", "Pooja Iyer", "Rahul Das", "Neha Kulkarni", "Armaan Khan", "Sonal Patel", "Kunal Bose"] },
@@ -140,7 +143,8 @@ async function main() {
     }
   }, { maxWait: 15000, timeout: 600000 });
   await mkdir(path.resolve(process.cwd(), ".local"), { recursive: true });
-  await writeFile(path.resolve(process.cwd(), ".local", "demo-credentials.txt"), credentialLines.join("\n") + "\n", { mode: 0o600 });
-  console.log(`Created demo batch ${batchKey} with 20 candidates, 10 recruiters, 5 institutions, 3 admins, 50 students, 30 jobs and 40 applications. Credentials: packages/database/.local/demo-credentials.txt`);
+  const reportName = isAuthorizedProduction ? "demo-credentials-production.txt" : "demo-credentials.txt";
+  await writeFile(path.resolve(process.cwd(), ".local", reportName), credentialLines.join("\n") + "\n", { mode: 0o600 });
+  console.log(`Created demo batch ${batchKey} with 20 candidates, 10 recruiters, 5 institutions, 3 admins, 50 students, 30 jobs and 40 applications. Credentials: packages/database/.local/${reportName}`);
 }
 main().catch(error => { console.error(error instanceof Error ? error.message : "Demo seed failed"); process.exitCode = 1; }).finally(() => prisma.$disconnect());
