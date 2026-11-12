@@ -38,6 +38,8 @@ For a Render Web Service connected to this repository, use the repository root a
 
 The `--include=dev` flag is required because the build uses Prisma, TypeScript, and their type definitions, even when `NODE_ENV=production` is set. The root `start` script launches the API workspace. The API listens on Render's assigned `PORT` when available, falling back to `API_PORT` and then `4000` for local development. Set `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `JWT_SECRET`, `AI_ENCRYPTION_KEY`, and `WEB_ORIGIN` as Render environment variables; never commit their values. Requests to `/` redirect to `WEB_ORIGIN`.
 
+For Neon Object Storage, add `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `OBJECT_STORAGE_BUCKET` to the API service, and set `FILE_STORAGE=s3`. Use the branch's S3 endpoint and credential; keep the bucket private. The application stores only object keys in PostgreSQL and serves downloads through its authenticated API route. Do not use the Neon Data API `/rest/v1` URL as `DATABASE_URL`; this backend connects to PostgreSQL through Prisma.
+
 ## 2.2 Render web service
 
 Deploy the Next.js frontend as a separate Render Web Service using the repository root and Node 22:

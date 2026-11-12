@@ -1,6 +1,7 @@
 import { config } from "../config";
 import type { EmailProvider, PaymentProvider, ResumeStorage, SmsProvider } from "./contracts";
 import { LocalFileStorage } from "./local-file-storage";
+import { S3FileStorage } from "./s3-file-storage";
 import { RazorpayPaymentProvider } from "./razorpay";
 import { HttpJsonEmailProvider, HttpJsonSmsProvider } from "./http-messaging";
 
@@ -65,7 +66,8 @@ export function getPaymentProvider(): PaymentProvider {
 }
 export function getResumeStorage(): ResumeStorage {
   if (storage) return storage;
-  if ((process.env.FILE_STORAGE || "local") === "local") return new LocalFileStorage();
+  if ((process.env.FILE_STORAGE || "local") === "local") return storage = new LocalFileStorage();
+  if (process.env.FILE_STORAGE === "s3") return storage = new S3FileStorage();
   throw new Error("Resume storage is not configured. Register a private local or object-storage adapter.");
 }
 export function integrationStatus() {
@@ -73,7 +75,7 @@ export function integrationStatus() {
     sms: sms?.name || (config.otpProvider === "http-json" ? "HTTP JSON adapter" : config.otpProvider === "console" && !config.isProd ? "console (development)" : config.otpProvider === "demo" ? "demo (development only)" : "not configured"),
     email: email?.name || (process.env.EMAIL_PROVIDER === "http-json" ? "HTTP JSON adapter" : (process.env.EMAIL_PROVIDER || "console") === "console" && !config.isProd ? "console (development)" : "not configured"),
     payment: payment?.name || (process.env.PAYMENT_PROVIDER === "razorpay" ? "razorpay" : process.env.PAYMENT_PROVIDER === "mock" && !config.isProd ? "mock (test only)" : "not configured"),
-    resumeStorage: storage?.name || ((process.env.FILE_STORAGE || "local") === "local" ? "private local disk" : "not configured"),
+    resumeStorage: storage?.name || ((process.env.FILE_STORAGE || "local") === "local" ? "private local disk" : process.env.FILE_STORAGE === "s3" ? "private S3-compatible object storage" : "not configured"),
     ai: process.env.AI_PROVIDER || "keyword baseline",
   };
 }
