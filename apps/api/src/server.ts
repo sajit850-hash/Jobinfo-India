@@ -42,7 +42,11 @@ app.get("/ready", async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
     res.json({ status: "ready", service: "jobinfo-api" });
-  } catch {
+  } catch (error) {
+    const details = error instanceof Error
+      ? error.message.replace(/postgres(?:ql)?:\/\/[^\s"'\x60]+/gi, "[database connection redacted]").slice(0, 240)
+      : "Unknown database connection error";
+    console.error("Database readiness probe failed:", details);
     res.status(503).json({ status: "not_ready", service: "jobinfo-api" });
   }
 });
