@@ -2,7 +2,9 @@ import { Router } from "express";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { prisma, Prisma } from "@jobinfo/database";
-import { requireAuth, userOf } from "../auth";
+import { requireAuth, signOtpToken, userOf } from "../auth";
+import { issueOtp } from "../otp";
+import { phoneSchema } from "../validation";
 
 export const recruitersRouter = Router();
 
@@ -13,30 +15,45 @@ recruitersRouter.post("/register", async (req, res) => {
     password: z.string().min(10).max(128),
     recruiterType: z.enum(["FREELANCE", "CORPORATE"]),
     companyName: z.string().trim().min(2).max(150).optional(),
-    phone: z.string().trim().max(20).optional(),
-    city: z.string().trim().max(80).optional()
+    phone: phoneSchema,
+    city: z.string().trim().max(80).optional(),
+    acceptTerms: z.literal(true, { errorMap: () => ({ message: "You must accept the Terms and Privacy Policy" }) }),
   }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: p.error.issues[0].message });
   const d = p.data;
   if (d.recruiterType === "CORPORATE" && !d.companyName) return res.status(400).json({ error: "Company name is required for corporate recruiters" });
-  const existing = await prisma.user.findUnique({ where: { email: d.email } });
-  if (existing) return res.status(409).json({ error: "Email already registered" });
+  const existing = await prisma.user.findFirst({ where: { OR: [{ email: d.email }, { phone: d.phone }] } });
+  if (existing) return res.status(409).json({ error: "An account with this email or mobile already exists. Try logging in." });
   const user = await prisma.user.create({
     data: {
       email: d.email, fullName: d.fullName, phone: d.phone,
-      passwordHash: await bcrypt.hash(d.password, 12), role: "RECRUITER",
+      passwordHash: await bcrypt.hash(d.password, 12), role: "RECRUITER", isActive: false, termsAcceptedAt: new Date(),
+      registrationDraft: { fullName: d.fullName, email: d.email, phone: d.phone, recruiterType: d.recruiterType, registrationType: "RECRUITER" },
       employer: { create: { name: d.companyName || d.fullName, city: d.city, recruiterType: d.recruiterType, industry: d.recruiterType === "FREELANCE" ? "Freelance Recruitment" : undefined } }
     },
     select: { id: true, email: true, fullName: true, role: true }
   });
-  await prisma.auditLog.create({ data: { actorId: user.id, action: "RECRUITER_REGISTERED", entityType: "User", entityId: user.id } });
-  res.status(201).json({ ok: true, user, message: "Account created. Complete verification before publishing jobs." });
+  try {
+    const otp = await issueOtp(user.id, d.phone);
+    if (!otp.ok) {
+      await prisma.user.delete({ where: { id: user.id } });
+      return res.status(429).json({ error: `Please wait ${otp.retryAfter}s before requesting another code` });
+    }
+    await prisma.auditLog.create({ data: { actorId: user.id, action: "RECRUITER_REGISTERED", entityType: "User", entityId: user.id } });
+    res.status(201).json({
+      ok: true, verificationToken: signOtpToken(user.id), maskedPhone: d.phone.slice(0, 3) + "XXXXX" + d.phone.slice(-3),
+      demoMode: otp.demoMode, devCode: otp.devCode, message: "Verify your mobile number to finish registration.",
+    });
+  } catch (error) {
+    await prisma.user.delete({ where: { id: user.id } });
+    res.status(503).json({ error: error instanceof Error ? error.message : "SMS provider is unavailable." });
+  }
 });
 
 recruitersRouter.use(requireAuth("RECRUITER"));
 recruitersRouter.get("/me", async (req, res) => {
   const userId = userOf(req).id;
-  const employer = await prisma.employer.findUnique({ where: { userId }, include: { jobs: { orderBy: { createdAt: "desc" }, take: 20, include: { _count: { select: { applications: true } } } } } });
+  const employer = await prisma.employer.findUnique({ where: { userId }, include: { user: { select: { fullName: true, email: true, phone: true, emailVerifiedAt: true, phoneVerifiedAt: true, registrationStatus: true } }, jobs: { orderBy: { createdAt: "desc" }, take: 20, include: { _count: { select: { applications: true } } } } } });
   if (!employer) return res.status(404).json({ error: "Recruiter profile not found" });
   res.json({ employer, summary: {
     totalJobs: await prisma.job.count({ where: { employerId: employer.id } }),
@@ -45,9 +62,64 @@ recruitersRouter.get("/me", async (req, res) => {
   } });
 });
 recruitersRouter.patch("/me", async (req, res) => {
-  const p = z.object({ name: z.string().trim().min(2).max(150).optional(), website: z.string().url().optional().or(z.literal("")), industry: z.string().max(100).optional(), city: z.string().max(80).optional() }).safeParse(req.body);
-  if (!p.success) return res.status(400).json({ error: "Invalid profile data" });
-  const employer = await prisma.employer.update({ where: { userId: userOf(req).id }, data: { name: p.data.name, website: p.data.website || null, industry: p.data.industry, city: p.data.city } });
+  const p = z.object({
+    fullName: z.string().trim().min(2).max(100).optional(),
+    name: z.string().trim().min(2).max(150).optional(),
+    website: z.string().url().max(500).optional().or(z.literal("")),
+    industry: z.string().trim().max(120).optional(),
+    city: z.string().trim().max(80).optional(),
+    recruiterDesignation: z.string().trim().max(120).optional(),
+    recruiterDepartment: z.string().trim().max(120).optional(),
+    recruiterLinkedinUrl: z.string().url().max(500).optional().or(z.literal("")),
+    companySize: z.string().trim().max(60).optional(),
+    description: z.string().trim().max(5000).optional(),
+    registeredAddress: z.string().trim().max(500).optional(),
+    state: z.string().trim().max(80).optional(),
+    postalCode: z.string().trim().max(20).optional(),
+    country: z.string().trim().max(80).optional(),
+    gstin: z.string().trim().max(20).optional(),
+    companyLinkedinUrl: z.string().url().max(500).optional().or(z.literal("")),
+    hiringDepartments: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
+    hiringLocations: z.array(z.string().trim().min(1).max(100)).max(30).optional(),
+    hiringVolume: z.number().int().min(0).max(1_000_000).optional(),
+    positionTypes: z.array(z.string().trim().min(1).max(80)).max(30).optional(),
+    recruitmentRequirements: z.string().trim().max(5000).optional(),
+    professionalExperienceYears: z.number().int().min(0).max(60).optional(),
+    specialization: z.string().trim().max(200).optional(),
+    preferredHiringCategories: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
+    corporateContactDetails: z.record(z.unknown()).optional(),
+    teamInformation: z.record(z.unknown()).optional(),
+    complete: z.boolean().optional(),
+  }).safeParse(req.body);
+  if (!p.success) return res.status(400).json({ error: p.error.issues[0].message });
+  const { complete, fullName, recruiterLinkedinUrl, companyLinkedinUrl, website, corporateContactDetails, teamInformation, ...fields } = p.data;
+  const userId = userOf(req).id;
+  const account = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { phoneVerifiedAt: true, emailVerifiedAt: true } });
+  if (!account.phoneVerifiedAt || !account.emailVerifiedAt) return res.status(403).json({ error: "Verify both mobile and email before saving your profile" });
+  if (complete && (!fields.name?.trim() || !fields.city?.trim() || !fields.industry?.trim())) {
+    return res.status(400).json({ error: "Company or recruiter name, industry, and city are required to complete the profile" });
+  }
+  const [employer] = await prisma.$transaction([
+    prisma.employer.update({
+      where: { userId },
+      data: {
+        ...fields,
+        website: website === undefined ? undefined : website || null,
+        recruiterLinkedinUrl: recruiterLinkedinUrl === undefined ? undefined : recruiterLinkedinUrl || null,
+        companyLinkedinUrl: companyLinkedinUrl === undefined ? undefined : companyLinkedinUrl || null,
+        corporateContactDetails: corporateContactDetails as Prisma.InputJsonValue | undefined,
+        teamInformation: teamInformation as Prisma.InputJsonValue | undefined,
+      },
+    }),
+    prisma.user.update({
+      where: { id: userId },
+      data: {
+        fullName,
+        registrationStatus: complete === undefined ? undefined : complete ? "REGISTRATION_COMPLETED" : "PROFILE_INCOMPLETE",
+        registrationDraft: complete ? Prisma.DbNull : undefined,
+      },
+    }),
+  ]);
   res.json({ employer });
 });
 

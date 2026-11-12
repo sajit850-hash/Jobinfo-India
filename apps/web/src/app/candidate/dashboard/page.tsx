@@ -21,6 +21,7 @@ export default function CandidateDashboard() {
     {error && <div className="err">{error} <Link href="/login">Sign in</Link></div>}
     {!candidate && !error && <p className="muted">Loading your dashboard…</p>}
     {candidate && <>
+      {!candidate.profileComplete && <div className="notice warning">Your candidate profile is still in progress. <Link className="textLink" href="/register/candidate">Resume registration</Link> or edit your profile.</div>}
       <div className="grid3 dashboardStats"><article className="card"><span className="muted">Applications</span><strong>{applications.length}</strong><Link href="/candidate/applications">Track applications →</Link></article>
         <article className="card"><span className="muted">Saved jobs</span><strong>{savedCount}</strong><Link href="/candidate/saved-jobs">View saved jobs →</Link></article>
         <article className="card"><span className="muted">Profile</span><strong>{candidate.profileComplete ? "Ready" : "In progress"}</strong><Link href="/candidate/profile">Edit profile →</Link></article></div>

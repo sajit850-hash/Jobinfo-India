@@ -18,6 +18,16 @@ Web: http://localhost:3000 — API health: http://localhost:4000/health
 
 `npm run build`
 
+## Registration tests
+
+Run API unit tests with `npm test --workspace @jobinfo/api`. The Neon registration integration test is opt-in and is skipped unless `ALLOW_REGISTRATION_TESTS=true` and all three staging settings below are supplied:
+
+- `REGISTRATION_TEST_DATABASE_URL` — database URL for the isolated test branch.
+- `REGISTRATION_TEST_DATABASE_URL_UNPOOLED` — direct URL for that same branch.
+- `REGISTRATION_TEST_BRANCH_HOST` — exact hostname used by `REGISTRATION_TEST_DATABASE_URL`.
+
+Run the same API test command after setting these variables. The integration test refuses a host mismatch, creates uniquely named test accounts, exercises all three registration journeys and deletes the accounts it created. Never point it at production.
+
 ## Create the first admin
 
 Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` (minimum 14 characters) in the environment, then run:

@@ -1,0 +1,2 @@
+ALTER TABLE "OtpCode"
+ADD COLUMN "provider" TEXT NOT NULL DEFAULT 'console';

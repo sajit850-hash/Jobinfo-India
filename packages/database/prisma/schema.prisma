@@ -15,6 +15,16 @@ enum UserRole {
   ADMIN
 }
 
+enum RegistrationStatus {
+  ACCOUNT_CREATED
+  MOBILE_VERIFIED
+  EMAIL_VERIFIED
+  VERIFICATION_COMPLETED
+  PROFILE_INCOMPLETE
+  PROFILE_COMPLETED
+  REGISTRATION_COMPLETED
+}
+
 enum JobStatus {
   DRAFT
   PENDING_APPROVAL
@@ -63,6 +73,8 @@ model User {
   emailVerifiedAt   DateTime?
   phoneVerifiedAt   DateTime?
   termsAcceptedAt   DateTime?
+  registrationStatus RegistrationStatus @default(ACCOUNT_CREATED)
+  registrationDraft Json?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
@@ -80,11 +92,12 @@ model User {
   notifications Notification[]
 }
 
-/// One-time passwords. Only a hash of the code is stored.
+/// One-time passwords. Real codes are hashed; demo verification inputs are never stored.
 model OtpCode {
   id         String    @id @default(cuid())
   userId     String
   purpose    String    @default("PHONE_VERIFY")
+  provider   String    @default("console")
   codeHash   String
   expiresAt  DateTime
   attempts   Int       @default(0)
@@ -110,6 +123,23 @@ model Candidate {
   experienceYears Int?     // null = not specified, 0 = fresher
   profileComplete Boolean  @default(false)
   searchable      Boolean  @default(false)
+  dateOfBirth     DateTime?
+  gender          String?
+  currentAddress  String?
+  postalCode      String?
+  country         String?
+  highestQualification String?
+  course          String?
+  grade           String?
+  expectedSalary  Int?
+  preferredJobLocations String[] @default([])
+  preferredJobRoles String[] @default([])
+  employmentType String?
+  workMode       String?
+  noticePeriod   String?
+  languages      String[] @default([])
+  linkedinUrl    String?
+  portfolioUrl   String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -142,6 +172,7 @@ model Education {
   field       String?
   department  String?
   passingYear Int?
+  grade       String?
 
   candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
 }
@@ -155,6 +186,30 @@ model Employer {
   city     String?
   recruiterType String @default("CORPORATE")
   verified Boolean @default(false)
+  recruiterDesignation String?
+  recruiterProfilePhotoKey String?
+  recruiterDepartment String?
+  recruiterLinkedinUrl String?
+  companySize String?
+  description String?
+  registeredAddress String?
+  state String?
+  postalCode String?
+  country String @default("India")
+  gstin String?
+  companyLinkedinUrl String?
+  companyLogoKey String?
+  hiringDepartments String[] @default([])
+  hiringLocations String[] @default([])
+  hiringVolume Int?
+  positionTypes String[] @default([])
+  recruitmentRequirements String?
+  professionalExperienceYears Int?
+  specialization String?
+  preferredHiringCategories String[] @default([])
+  corporateContactDetails Json?
+  verificationDocumentKeys String[] @default([])
+  teamInformation Json?
 
   user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
   jobs Job[]
@@ -447,9 +502,28 @@ model Institution {
   city     String
   state    String
   verified Boolean @default(false)
+  institutionType String?
+  category String?
+  establishedYear Int?
+  affiliation String?
+  accreditation String?
+  registrationNumber String?
+  description String?
+  contactDesignation String?
+  address String?
+  postalCode String?
+  country String @default("India")
+  logoKey String?
+  studentStrength Int?
+  passingYears Int[] @default([])
+  placementOfficer Json?
+  registrationDocumentKeys String[] @default([])
+  accreditationDocumentKeys String[] @default([])
+  affiliationDocumentKeys String[] @default([])
 
   user        User? @relation(fields: [userId], references: [id], onDelete: SetNull)
   departments Department[]
+  courses     InstitutionCourse[]
   students    InstitutionStudent[]
 }
 
@@ -459,6 +533,18 @@ model Department {
   name          String
 
   institution Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+
+}
+
+model InstitutionCourse {
+  id            String @id @default(cuid())
+  institutionId String
+  name          String
+  createdAt     DateTime @default(now())
+
+  institution Institution @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+
+  @@index([institutionId, name])
 }
 
 model InstitutionStudent {
@@ -610,6 +696,8 @@ model Certification {
   issuer      String?
   issueYear   Int?
   credentialUrl String?
+  issueDate DateTime?
+  expiryDate DateTime?
   createdAt   DateTime @default(now())
   candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
   @@index([candidateId])
@@ -625,6 +713,7 @@ model WorkExperience {
   startDate   DateTime
   endDate     DateTime?
   current     Boolean  @default(false)
+  employmentType String?
   createdAt   DateTime @default(now())
   candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
 

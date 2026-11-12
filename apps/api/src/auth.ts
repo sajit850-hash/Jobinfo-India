@@ -33,8 +33,12 @@ export function requireAuth(...roles: string[]) {
   return async (req: Request, res: Response, next: NextFunction) => {
     const u = readSession(req);
     if (!u) return res.status(401).json({ error: "Not signed in" });
-    const current = await prisma.user.findUnique({ where: { id: u.id }, select: { role: true, isActive: true, sessionVersion: true } });
+    const current = await prisma.user.findUnique({ where: { id: u.id }, select: { role: true, isActive: true, sessionVersion: true, phone: true, phoneVerifiedAt: true, registrationStatus: true } });
     if (!current?.isActive || current.sessionVersion !== u.sessionVersion) return res.status(401).json({ error: "Session expired. Sign in again." });
+    if (current.phone && !current.phoneVerifiedAt) return res.status(403).json({ error: "Please verify your mobile number first." });
+    if (current.registrationStatus === "MOBILE_VERIFIED" && !req.path.startsWith("/email/verification/")) {
+      return res.status(403).json({ error: "Please verify your email address to continue registration." });
+    }
     if (current.role !== u.role || (roles.length && !roles.includes(current.role))) return res.status(403).json({ error: "Forbidden" });
     (req as Request & { user: SessionUser }).user = u;
     next();
@@ -44,7 +48,7 @@ export const userOf = (req: Request) => (req as Request & { user: SessionUser })
 
 /** Short-lived token proving the holder just registered and must verify OTP. */
 export const signOtpToken = (userId: string) =>
-  jwt.sign({ uid: userId, purpose: "otp" }, config.jwtSecret, { expiresIn: "30m" });
+  jwt.sign({ uid: userId, purpose: "otp" }, config.jwtSecret, { expiresIn: "7d" });
 export function readOtpToken(token: string): string | null {
   try {
     const p = jwt.verify(token, config.jwtSecret) as { uid: string; purpose: string };

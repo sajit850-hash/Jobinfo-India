@@ -49,6 +49,14 @@ Deploy the Next.js frontend as a separate Render Web Service using the repositor
 
 The web start command uses Render's assigned `PORT`. Set the API service's `WEB_ORIGIN` to the frontend service URL so browser API requests pass CORS checks.
 
+## 2.3 OTP provider modes
+
+Set `OTP_PROVIDER=demo` only for local development (`NODE_ENV=development`) or explicitly authorized staging (`NODE_ENV=staging` and `OTP_DEMO_STAGING_ENABLED=true`). Demo mode sends no SMS, stores no entered OTP, and accepts any exactly six-digit numeric code against an unexpired, unused phone-verification record. The API refuses to start with demo OTP mode in production.
+
+`OTP_PROVIDER=console` generates a development OTP and logs it locally. `OTP_PROVIDER=http-json` uses the configured generic SMS adapter. `msg91` and `twilio` are reserved until their provider adapters and credentials are configured. The frontend's `NEXT_PUBLIC_OTP_PROVIDER=demo` controls the local demo hint only; never set it for public production builds.
+
+Candidate, recruiter, and institution registrations use the same OTP issue and verification endpoints. Accounts with a phone number cannot log in or use authenticated routes until verification succeeds.
+
 ## 3. Database migration gate
 
 Do not run `prisma db push` on production. The initial migration `20261111_000000_baseline` creates the current schema on a clean PostgreSQL database; later migrations add query indexes, session controls, and billing referential integrity. Validate the full chain against an empty PostgreSQL 16 database and keep backup/restore rehearsal evidence with the release.

@@ -11,10 +11,10 @@ privacyRouter.use(requireAuth());
 privacyRouter.get("/export", async (req, res) => {
   const userId = userOf(req).id;
   const [user, candidate, employer, institution, billingProfile, notifications, subscriptions, invoices] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId }, select: { id: true, fullName: true, email: true, phone: true, role: true, emailVerifiedAt: true, phoneVerifiedAt: true, termsAcceptedAt: true, createdAt: true, updatedAt: true } }),
+    prisma.user.findUnique({ where: { id: userId }, select: { id: true, fullName: true, email: true, phone: true, role: true, emailVerifiedAt: true, phoneVerifiedAt: true, registrationStatus: true, registrationDraft: true, termsAcceptedAt: true, createdAt: true, updatedAt: true } }),
     prisma.candidate.findUnique({ where: { userId }, include: { skills: true, education: true, certifications: true, workExperience: true, applications: { include: { job: { select: { id: true, title: true, status: true, employer: { select: { name: true } } } } } } } }),
     prisma.employer.findUnique({ where: { userId }, include: { jobs: { select: { id: true, title: true, status: true, createdAt: true, updatedAt: true } } } }),
-    prisma.institution.findUnique({ where: { userId }, include: { departments: true, students: { include: { placements: true } } } }),
+    prisma.institution.findUnique({ where: { userId }, include: { departments: true, courses: true, students: { include: { placements: true } } } }),
     prisma.billingProfile.findUnique({ where: { userId } }),
     prisma.notification.findMany({ where: { userId }, orderBy: { createdAt: "desc" } }),
     prisma.subscription.findMany({ where: { userId }, orderBy: { createdAt: "desc" } }),
@@ -28,11 +28,25 @@ privacyRouter.get("/export", async (req, res) => {
 privacyRouter.post("/delete-account", async (req, res) => {
   const body = req.body as { password?: unknown; confirmation?: unknown };
   if (typeof body.password !== "string" || body.confirmation !== "DELETE") return res.status(400).json({ error: "Enter your password and type DELETE to confirm account removal" });
-  const user = await prisma.user.findUnique({ where: { id: userOf(req).id }, include: { candidate: { select: { resumeUrl: true, profilePhotoKey: true } } } });
+  const user = await prisma.user.findUnique({
+    where: { id: userOf(req).id },
+    include: {
+      candidate: { select: { resumeUrl: true, profilePhotoKey: true } },
+      employer: { select: { recruiterProfilePhotoKey: true, companyLogoKey: true, verificationDocumentKeys: true } },
+      institution: { select: { logoKey: true, registrationDocumentKeys: true, accreditationDocumentKeys: true, affiliationDocumentKeys: true } },
+    },
+  });
   if (!user || !await bcrypt.compare(body.password, user.passwordHash)) return res.status(401).json({ error: "Password is incorrect" });
   try {
     if (user.candidate?.resumeUrl) await getResumeStorage().remove(user.candidate.resumeUrl);
     if (user.candidate?.profilePhotoKey) await getResumeStorage().remove(user.candidate.profilePhotoKey);
+    if (user.employer?.recruiterProfilePhotoKey) await getResumeStorage().remove(user.employer.recruiterProfilePhotoKey);
+    if (user.employer?.companyLogoKey) await getResumeStorage().remove(user.employer.companyLogoKey);
+    for (const key of user.employer?.verificationDocumentKeys ?? []) await getResumeStorage().remove(key);
+    if (user.institution?.logoKey) await getResumeStorage().remove(user.institution.logoKey);
+    for (const key of user.institution?.registrationDocumentKeys ?? []) await getResumeStorage().remove(key);
+    for (const key of user.institution?.accreditationDocumentKeys ?? []) await getResumeStorage().remove(key);
+    for (const key of user.institution?.affiliationDocumentKeys ?? []) await getResumeStorage().remove(key);
   } catch { return res.status(503).json({ error: "Could not remove private uploaded files. Account data was not changed." }); }
 
   const tombstoneEmail = `deleted-${user.id}@deleted.invalid`;
@@ -49,4 +63,3 @@ privacyRouter.post("/delete-account", async (req, res) => {
   });
   res.json({ ok: true, message: "Account profile and private uploads were removed. You have been signed out." });
 });
-

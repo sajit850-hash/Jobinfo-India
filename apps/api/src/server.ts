@@ -17,6 +17,7 @@ import { billingRouter } from "./routes/billing";
 import { companiesRouter } from "./routes/companies";
 import { expireSubscriptions } from "./billing/settlement";
 import { privacyRouter } from "./routes/privacy";
+import { profileFilesRouter } from "./routes/profile-files";
 import { prisma } from "@jobinfo/database";
 
 const app = express();
@@ -57,6 +58,7 @@ app.use("/api/v1/cms", cmsRouter);
 app.use("/api/v1/admin", adminRouter);
 app.use("/api/v1/notifications", notificationsRouter);
 app.use("/api/v1/billing", billingRouter);
+app.use("/api/v1/profile-files", profileFilesRouter);
 
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { prisma } from "@jobinfo/database";
+import { prisma, Prisma } from "@jobinfo/database";
 import { requireAuth, userOf } from "../auth";
 import { getResumeStorage } from "../integrations/registry";
 
@@ -13,7 +13,23 @@ const profileSchema = z.object({
   summary: z.string().trim().max(2000).optional(),
   city: z.string().trim().max(80).optional(),
   state: z.string().trim().max(80).optional(),
+  currentAddress: z.string().trim().max(500).optional(),
+  dateOfBirth: z.string().date().optional(),
+  gender: z.string().trim().max(40).optional(),
+  highestQualification: z.string().trim().max(120).optional(),
+  course: z.string().trim().max(150).optional(),
+  grade: z.string().trim().max(40).optional(),
   experienceYears: z.number().int().min(0).max(50).optional(),
+  expectedSalary: z.number().int().min(0).max(2_000_000_000).optional(),
+  preferredJobLocations: z.array(z.string().trim().min(1).max(100)).max(30).default([]),
+  preferredJobRoles: z.array(z.string().trim().min(1).max(120)).max(30).default([]),
+  employmentType: z.string().trim().max(60).optional(),
+  workMode: z.string().trim().max(60).optional(),
+  noticePeriod: z.string().trim().max(60).optional(),
+  languages: z.array(z.string().trim().min(1).max(60)).max(30).default([]),
+  linkedinUrl: z.string().url().max(500).optional().or(z.literal("")),
+  portfolioUrl: z.string().url().max(500).optional().or(z.literal("")),
+  complete: z.boolean().optional(),
   searchable: z.boolean().optional(),
   skills: z.array(z.string().trim().min(1).max(40)).max(30).default([]),
   education: z.array(z.object({
@@ -22,11 +38,14 @@ const profileSchema = z.object({
     field: z.string().trim().max(100).optional(),
     department: z.string().trim().max(100).optional(),
     passingYear: z.number().int().min(1970).max(2100).optional(),
+    grade: z.string().trim().max(40).optional(),
   })).max(10).default([]),
   certifications: z.array(z.object({
     name: z.string().trim().min(1).max(150),
     issuer: z.string().trim().max(150).optional(),
     issueYear: z.number().int().min(1970).max(2100).optional(),
+    issueDate: z.string().date().optional(),
+    expiryDate: z.string().date().optional(),
     credentialUrl: z.string().url().optional().or(z.literal("")),
   })).max(20).default([]),
   workExperience: z.array(z.object({
@@ -34,6 +53,7 @@ const profileSchema = z.object({
     title: z.string().trim().min(1).max(150),
     location: z.string().trim().max(100).optional(),
     description: z.string().trim().max(2000).optional(),
+    employmentType: z.string().trim().max(60).optional(),
     startDate: z.string().date(),
     endDate: z.string().date().optional(),
     current: z.boolean().default(false),
@@ -42,7 +62,7 @@ const profileSchema = z.object({
 
 
 candidatesRouter.get("/me", async (req, res) => {
-  const candidate = await prisma.candidate.findUnique({ where: { userId: userOf(req).id }, include: { user: { select: { fullName: true, email: true, phone: true, emailVerifiedAt: true, phoneVerifiedAt: true } }, skills: true, education: true, certifications: true, workExperience: { orderBy: { startDate: "desc" } } } });
+  const candidate = await prisma.candidate.findUnique({ where: { userId: userOf(req).id }, include: { user: { select: { fullName: true, email: true, phone: true, emailVerifiedAt: true, phoneVerifiedAt: true, registrationStatus: true } }, skills: true, education: true, certifications: true, workExperience: { orderBy: { startDate: "desc" } } } });
   if (!candidate) return res.status(404).json({ error: "Candidate profile not found" });
   const { resumeUrl, profilePhotoKey, ...profile } = candidate;
   res.json({ candidate: { ...profile, hasResume: !!resumeUrl, hasProfilePhoto: !!profilePhotoKey } });
@@ -51,8 +71,14 @@ candidatesRouter.get("/me", async (req, res) => {
 candidatesRouter.put("/me", async (req, res) => {
   const p = profileSchema.safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: p.error.issues[0].message });
-  const { fullName, skills, education, certifications, workExperience, ...rest } = p.data;
+  const { fullName, skills, education, certifications, workExperience, complete: requestedComplete, dateOfBirth, ...rest } = p.data;
+  const complete = requestedComplete ?? true;
   const cand = await prisma.candidate.findUniqueOrThrow({ where: { userId: userOf(req).id } });
+  const account = await prisma.user.findUniqueOrThrow({ where: { id: userOf(req).id }, select: { phoneVerifiedAt: true, emailVerifiedAt: true } });
+  if (!account.phoneVerifiedAt || !account.emailVerifiedAt) return res.status(403).json({ error: "Verify both mobile and email before saving your profile" });
+  if (complete && (!rest.headline?.trim() || !rest.city?.trim() || (!skills.length && !education.length && !workExperience.length))) {
+    return res.status(400).json({ error: "Add a headline, current city, and at least one skill, education record, or experience record to complete your profile" });
+  }
   const unique = [...new Set(skills.map((s) => s.toLowerCase()))].map(
     (n) => skills.find((s) => s.toLowerCase() === n)!,
   );
@@ -60,16 +86,33 @@ candidatesRouter.put("/me", async (req, res) => {
     ...(fullName ? [prisma.user.update({ where: { id: userOf(req).id }, data: { fullName } })] : []),
     prisma.candidate.update({
       where: { id: cand.id },
-      data: { ...rest, passingYear: education[0]?.passingYear, profileComplete: true },
+      data: {
+        ...rest,
+        dateOfBirth: dateOfBirth ? new Date(`${dateOfBirth}T00:00:00.000Z`) : undefined,
+        linkedinUrl: rest.linkedinUrl || null,
+        portfolioUrl: rest.portfolioUrl || null,
+        passingYear: education[0]?.passingYear,
+        profileComplete: complete,
+      },
     }),
     prisma.candidateSkill.deleteMany({ where: { candidateId: cand.id } }),
     prisma.candidateSkill.createMany({ data: unique.map((name) => ({ candidateId: cand.id, name })) }),
     prisma.education.deleteMany({ where: { candidateId: cand.id } }),
     ...(education.length ? [prisma.education.createMany({ data: education.map((e) => ({ ...e, candidateId: cand.id })) })] : []),
     prisma.certification.deleteMany({ where: { candidateId: cand.id } }),
-    ...(certifications.length ? [prisma.certification.createMany({ data: certifications.map((c) => ({ ...c, credentialUrl: c.credentialUrl || null, candidateId: cand.id })) })] : []),
+    ...(certifications.length ? [prisma.certification.createMany({ data: certifications.map((c) => ({
+      ...c,
+      issueDate: c.issueDate ? new Date(`${c.issueDate}T00:00:00.000Z`) : null,
+      expiryDate: c.expiryDate ? new Date(`${c.expiryDate}T00:00:00.000Z`) : null,
+      credentialUrl: c.credentialUrl || null,
+      candidateId: cand.id,
+    })) })] : []),
     prisma.workExperience.deleteMany({ where: { candidateId: cand.id } }),
     ...(workExperience.length ? [prisma.workExperience.createMany({ data: workExperience.map((x) => ({ ...x, startDate: new Date(`${x.startDate}T00:00:00.000Z`), endDate: x.endDate ? new Date(`${x.endDate}T00:00:00.000Z`) : null, candidateId: cand.id })) })] : []),
+    prisma.user.update({
+      where: { id: userOf(req).id },
+      data: { registrationStatus: complete ? "REGISTRATION_COMPLETED" : "PROFILE_INCOMPLETE", registrationDraft: complete ? Prisma.DbNull : undefined },
+    }),
   ]);
   res.json({ ok: true });
 });

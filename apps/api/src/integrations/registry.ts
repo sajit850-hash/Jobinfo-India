@@ -46,8 +46,9 @@ export function registerResumeStorage(provider: ResumeStorage) { storage = provi
 
 export function getSmsProvider(): SmsProvider {
   if (sms) return sms;
-  if (process.env.OTP_PROVIDER === "http-json") return new HttpJsonSmsProvider();
-  if (process.env.OTP_PROVIDER === "console" && !config.isProd) return new ConsoleSmsProvider();
+  if (config.otpProvider === "http-json") return new HttpJsonSmsProvider();
+  if (config.otpProvider === "console" && !config.isProd) return new ConsoleSmsProvider();
+  if (config.otpProvider === "demo") throw new Error("Demo OTP mode does not send SMS.");
   throw new Error("SMS provider is not configured. Add a provider adapter and credentials.");
 }
 export function getEmailProvider(): EmailProvider {
@@ -69,7 +70,7 @@ export function getResumeStorage(): ResumeStorage {
 }
 export function integrationStatus() {
   return {
-    sms: sms?.name || (process.env.OTP_PROVIDER === "http-json" ? "HTTP JSON adapter" : process.env.OTP_PROVIDER === "console" && !config.isProd ? "console (development)" : "not configured"),
+    sms: sms?.name || (config.otpProvider === "http-json" ? "HTTP JSON adapter" : config.otpProvider === "console" && !config.isProd ? "console (development)" : config.otpProvider === "demo" ? "demo (development only)" : "not configured"),
     email: email?.name || (process.env.EMAIL_PROVIDER === "http-json" ? "HTTP JSON adapter" : (process.env.EMAIL_PROVIDER || "console") === "console" && !config.isProd ? "console (development)" : "not configured"),
     payment: payment?.name || (process.env.PAYMENT_PROVIDER === "razorpay" ? "razorpay" : process.env.PAYMENT_PROVIDER === "mock" && !config.isProd ? "mock (test only)" : "not configured"),
     resumeStorage: storage?.name || ((process.env.FILE_STORAGE || "local") === "local" ? "private local disk" : "not configured"),

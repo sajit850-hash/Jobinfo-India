@@ -1,8 +1,10 @@
 import { Router } from "express";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
-import { prisma } from "@jobinfo/database";
-import { requireAuth, userOf } from "../auth";
+import { prisma, Prisma } from "@jobinfo/database";
+import { requireAuth, signOtpToken, userOf } from "../auth";
+import { issueOtp } from "../otp";
+import { phoneSchema } from "../validation";
 
 export const institutionsRouter = Router();
 institutionsRouter.get("/", async (req, res) => {
@@ -15,25 +17,51 @@ institutionsRouter.get("/", async (req, res) => {
 });
 institutionsRouter.post("/register", async (req, res) => {
   const p = z.object({
-    contactName: z.string().trim().min(2).max(100), email: z.string().email().toLowerCase(),
+    contactName: z.string().trim().min(2).max(100), email: z.string().trim().email().toLowerCase(),
     password: z.string().min(10).max(128), name: z.string().trim().min(2).max(180),
-    city: z.string().trim().min(2).max(80), state: z.string().trim().min(2).max(80),
-    website: z.string().url().optional().or(z.literal(""))
+    phone: phoneSchema,
+    acceptTerms: z.literal(true, { errorMap: () => ({ message: "You must accept the Terms and Privacy Policy" }) }),
   }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: p.error.issues[0].message });
-  if (await prisma.user.findUnique({ where: { email: p.data.email } })) return res.status(409).json({ error: "Email already registered" });
+  if (await prisma.user.findFirst({ where: { OR: [{ email: p.data.email }, { phone: p.data.phone }] } })) {
+    return res.status(409).json({ error: "An account with this email or mobile already exists. Try logging in." });
+  }
   const user = await prisma.user.create({
-    data: { email: p.data.email, fullName: p.data.contactName, passwordHash: await bcrypt.hash(p.data.password, 12), role: "INSTITUTION",
-      institution: { create: { name: p.data.name, city: p.data.city, state: p.data.state, website: p.data.website, verified: false } } },
+    data: {
+      email: p.data.email,
+      phone: p.data.phone,
+      fullName: p.data.contactName,
+      passwordHash: await bcrypt.hash(p.data.password, 12),
+      role: "INSTITUTION",
+      isActive: false,
+      termsAcceptedAt: new Date(),
+      registrationDraft: { contactName: p.data.contactName, email: p.data.email, phone: p.data.phone, name: p.data.name, registrationType: "INSTITUTION" },
+      institution: { create: { name: p.data.name, city: "", state: "", verified: false } },
+    },
     select: { id: true, email: true, role: true }
   });
-  res.status(201).json({ ok: true, user, message: "Institution submitted for verification." });
+  try {
+    const otp = await issueOtp(user.id, p.data.phone);
+    if (!otp.ok) {
+      await prisma.user.delete({ where: { id: user.id } });
+      return res.status(429).json({ error: `Please wait ${otp.retryAfter}s before requesting another code` });
+    }
+    res.status(201).json({
+      ok: true, verificationToken: signOtpToken(user.id), maskedPhone: p.data.phone.slice(0, 3) + "XXXXX" + p.data.phone.slice(-3),
+      demoMode: otp.demoMode, devCode: otp.devCode, message: "Verify your mobile number to finish registration.",
+    });
+  } catch (error) {
+    await prisma.user.delete({ where: { id: user.id } });
+    res.status(503).json({ error: error instanceof Error ? error.message : "SMS provider is unavailable." });
+  }
 });
 institutionsRouter.get("/me", requireAuth("INSTITUTION"), async (req, res) => {
   const institution = await prisma.institution.findUnique({
     where: { userId: userOf(req).id },
     include: {
+      user: { select: { fullName: true, email: true, phone: true, registrationStatus: true } },
       departments: { orderBy: { name: "asc" } },
+      courses: { orderBy: { name: "asc" } },
       students: {
         include: { placements: { orderBy: { createdAt: "desc" } } },
         orderBy: [{ passingYear: "desc" }, { fullName: "asc" }],
@@ -49,10 +77,80 @@ institutionsRouter.get("/me", requireAuth("INSTITUTION"), async (req, res) => {
   res.json({ institution, summary: { studentCount, placedCount, seekingCount } });
 });
 institutionsRouter.patch("/me", requireAuth("INSTITUTION"), async (req, res) => {
-  const p = z.object({ name: z.string().trim().min(2).max(180), city: z.string().trim().min(2).max(80), state: z.string().trim().min(2).max(80), website: z.string().url().optional().or(z.literal("")) }).safeParse(req.body);
+  const p = z.object({
+    name: z.string().trim().min(2).max(180).optional(),
+    city: z.string().trim().max(80).optional(),
+    state: z.string().trim().max(80).optional(),
+    website: z.string().url().max(500).optional().or(z.literal("")),
+    institutionType: z.string().trim().max(100).optional(),
+    category: z.string().trim().max(100).optional(),
+    establishedYear: z.number().int().min(1500).max(new Date().getFullYear()).optional(),
+    affiliation: z.string().trim().max(200).optional(),
+    accreditation: z.string().trim().max(200).optional(),
+    registrationNumber: z.string().trim().max(150).optional(),
+    description: z.string().trim().max(5000).optional(),
+    contactDesignation: z.string().trim().max(120).optional(),
+    address: z.string().trim().max(500).optional(),
+    postalCode: z.string().trim().max(20).optional(),
+    country: z.string().trim().max(80).optional(),
+    studentStrength: z.number().int().min(0).max(10_000_000).optional(),
+    passingYears: z.array(z.number().int().min(1990).max(2100)).max(30).optional(),
+    placementOfficer: z.object({
+      name: z.string().trim().max(120).optional(),
+      email: z.string().trim().email().optional().or(z.literal("")),
+      phone: z.string().trim().max(30).optional(),
+      designation: z.string().trim().max(120).optional(),
+    }).optional(),
+    departments: z.array(z.string().trim().min(2).max(100)).max(100).optional(),
+    courses: z.array(z.string().trim().min(2).max(150)).max(200).optional(),
+    complete: z.boolean().optional(),
+  }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: p.error.issues[0].message });
-  const institution = await prisma.institution.update({ where: { userId: userOf(req).id }, data: { ...p.data, website: p.data.website || null } });
-  res.json({ institution });
+  const { complete, departments, courses, website, ...fields } = p.data;
+  const userId = userOf(req).id;
+  const account = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { phoneVerifiedAt: true, emailVerifiedAt: true } });
+  if (!account.phoneVerifiedAt || !account.emailVerifiedAt) return res.status(403).json({ error: "Verify both mobile and email before saving your profile" });
+  if (complete && (!fields.name?.trim() || !fields.city?.trim() || !fields.state?.trim() || !(departments?.length || courses?.length))) {
+    return res.status(400).json({ error: "Institution name, city, state, and at least one department or course are required to complete the profile" });
+  }
+  const institution = await prisma.institution.findUniqueOrThrow({ where: { userId }, select: { id: true } });
+  const existingDepartments = departments?.length
+    ? await prisma.department.findMany({ where: { institutionId: institution.id }, select: { name: true } })
+    : [];
+  const existingCourses = courses?.length
+    ? await prisma.institutionCourse.findMany({ where: { institutionId: institution.id }, select: { name: true } })
+    : [];
+  const departmentNames = new Set(existingDepartments.map(({ name }) => name.toLowerCase()));
+  const newDepartments = (departments ?? []).filter((name) => {
+    const key = name.toLowerCase();
+    if (departmentNames.has(key)) return false;
+    departmentNames.add(key);
+    return true;
+  });
+  const courseNames = new Set(existingCourses.map(({ name }) => name.toLowerCase()));
+  const newCourses = (courses ?? []).filter((name) => {
+    const key = name.toLowerCase();
+    if (courseNames.has(key)) return false;
+    courseNames.add(key);
+    return true;
+  });
+  await prisma.$transaction([
+    prisma.institution.update({
+      where: { userId },
+      data: { ...fields, website: website === undefined ? undefined : website || null },
+    }),
+    ...(newDepartments.length ? [prisma.department.createMany({ data: newDepartments.map((name) => ({ institutionId: institution.id, name })) })] : []),
+    ...(newCourses.length ? [prisma.institutionCourse.createMany({ data: newCourses.map((name) => ({ institutionId: institution.id, name })) })] : []),
+    prisma.user.update({
+      where: { id: userId },
+      data: {
+        registrationStatus: complete === undefined ? undefined : complete ? "REGISTRATION_COMPLETED" : "PROFILE_INCOMPLETE",
+        registrationDraft: complete ? Prisma.DbNull : undefined,
+      },
+    }),
+  ]);
+  const savedInstitution = await prisma.institution.findUniqueOrThrow({ where: { userId }, include: { departments: true, courses: true } });
+  res.json({ institution: savedInstitution });
 });
 institutionsRouter.post("/me/departments", requireAuth("INSTITUTION"), async (req, res) => {
   const p = z.object({ name: z.string().trim().min(2).max(100) }).safeParse(req.body);
