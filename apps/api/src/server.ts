@@ -19,6 +19,7 @@ import { expireSubscriptions } from "./billing/settlement";
 import { privacyRouter } from "./routes/privacy";
 import { profileFilesRouter } from "./routes/profile-files";
 import { prisma } from "@jobinfo/database";
+import { checkResumeStorage } from "./integrations/registry";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -39,16 +40,39 @@ app.use("/api/v1/privacy", privacyRouter);
 app.get("/", (_req, res) => res.redirect(config.webOrigin));
 app.get("/health", (_req, res) => res.json({ status: "ok", service: "jobinfo-api", timestamp: new Date().toISOString() }));
 app.get("/ready", async (_req, res) => {
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    res.json({ status: "ready", service: "jobinfo-api" });
-  } catch (error) {
-    const details = error instanceof Error
-      ? error.message.replace(/postgres(?:ql)?:\/\/[^\s"'\x60]+/gi, "[database connection redacted]").slice(0, 240)
-      : "Unknown database connection error";
-    console.error("Database readiness probe failed:", details);
-    res.status(503).json({ status: "not_ready", service: "jobinfo-api" });
+  type Check = { status: "ready" | "unavailable" | "misconfigured"; missing?: string[] };
+  const checks: Record<string, Check> = {};
+  const databaseUrl = process.env.DATABASE_URL || process.env.DATABASE_URL_UNPOOLED;
+  if (!databaseUrl) checks.database = { status: "misconfigured", missing: ["DATABASE_URL or DATABASE_URL_UNPOOLED"] };
+  else if (!/^postgres(?:ql)?:\/\//i.test(databaseUrl) || /\/rest\/v1(?:\/|$)/i.test(databaseUrl)) {
+    checks.database = { status: "misconfigured", missing: ["PostgreSQL connection URL (not the Neon REST API URL)"] };
   }
+
+  const storageMode = process.env.FILE_STORAGE || "local";
+  if (storageMode === "s3") {
+    const required = ["AWS_ENDPOINT_URL_S3", "AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "OBJECT_STORAGE_BUCKET"];
+    const missing = required.filter((name) => !process.env[name]?.trim());
+    if (missing.length) checks.storage = { status: "misconfigured", missing };
+  } else if (storageMode !== "local") {
+    checks.storage = { status: "misconfigured", missing: ["FILE_STORAGE must be local or s3"] };
+  }
+
+  const tasks: Array<["database" | "storage", Promise<unknown>]> = [];
+  if (!checks.database) tasks.push(["database", prisma.$queryRaw`SELECT 1`]);
+  if (!checks.storage) tasks.push(["storage", checkResumeStorage()]);
+  const results = await Promise.allSettled(tasks.map(([, task]) => task));
+  results.forEach((result, index) => {
+    const name = tasks[index][0];
+    if (result.status === "fulfilled") checks[name] = { status: "ready" };
+    else {
+      checks[name] = { status: "unavailable" };
+      const error = result.reason;
+      const code = error && typeof error === "object" && "code" in error ? String(error.code) : "unknown";
+      console.error(`${name} readiness probe failed (code: ${code})`);
+    }
+  });
+  const ready = Object.values(checks).every(({ status }) => status === "ready");
+  res.status(ready ? 200 : 503).json({ status: ready ? "ready" : "not_ready", service: "jobinfo-api", checks });
 });
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/candidates", candidatesRouter);

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import {
   DeleteObjectCommand,
+  HeadBucketCommand,
   GetObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -35,6 +36,10 @@ export class S3FileStorage implements ResumeStorage {
 
   private validateKey(key: string) {
     if (!/^users\/[A-Za-z0-9_-]+\/[a-f0-9-]{36}$/.test(key)) throw new Error("Invalid private file key");
+  }
+
+  async check() {
+    await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
   }
 
   async save(input: { ownerId: string; fileName: string; contentType: string; bytes: Buffer }) {

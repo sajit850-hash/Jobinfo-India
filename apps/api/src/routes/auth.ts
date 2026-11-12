@@ -17,7 +17,7 @@ const registerSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   phone: phoneSchema,
   password: z.string().min(8, "Minimum 8 characters").max(128),
-  acceptTerms: z.literal(true, { errorMap: () => ({ message: "You must accept the Terms and Privacy Policy" }) }),
+  acceptTerms: z.literal(true, { error: "You must accept the Terms and Privacy Policy" }),
 });
 
 authRouter.post("/register/candidate", async (req, res) => {
@@ -114,7 +114,7 @@ authRouter.get("/registration/status", async (req, res) => {
 });
 
 authRouter.put("/registration/draft", requireAuth(), async (req, res) => {
-  const p = z.object({ draft: z.record(z.unknown()) }).safeParse(req.body);
+  const p = z.object({ draft: z.record(z.string(), z.unknown()) }).safeParse(req.body);
   if (!p.success || JSON.stringify(p.data?.draft ?? {}).length > 100_000) {
     return res.status(400).json({ error: "Registration draft is invalid or too large" });
   }

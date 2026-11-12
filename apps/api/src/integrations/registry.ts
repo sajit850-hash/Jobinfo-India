@@ -70,6 +70,9 @@ export function getResumeStorage(): ResumeStorage {
   if (process.env.FILE_STORAGE === "s3") return storage = new S3FileStorage();
   throw new Error("Resume storage is not configured. Register a private local or object-storage adapter.");
 }
+export async function checkResumeStorage() {
+  await getResumeStorage().check();
+}
 export function integrationStatus() {
   return {
     sms: sms?.name || (config.otpProvider === "http-json" ? "HTTP JSON adapter" : config.otpProvider === "console" && !config.isProd ? "console (development)" : config.otpProvider === "demo" ? "demo (development only)" : "not configured"),

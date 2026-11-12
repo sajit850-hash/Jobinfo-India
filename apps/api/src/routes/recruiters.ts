@@ -17,7 +17,7 @@ recruitersRouter.post("/register", async (req, res) => {
     companyName: z.string().trim().min(2).max(150).optional(),
     phone: phoneSchema,
     city: z.string().trim().max(80).optional(),
-    acceptTerms: z.literal(true, { errorMap: () => ({ message: "You must accept the Terms and Privacy Policy" }) }),
+    acceptTerms: z.literal(true, { error: "You must accept the Terms and Privacy Policy" }),
   }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: p.error.issues[0].message });
   const d = p.data;
@@ -87,8 +87,8 @@ recruitersRouter.patch("/me", async (req, res) => {
     professionalExperienceYears: z.number().int().min(0).max(60).optional(),
     specialization: z.string().trim().max(200).optional(),
     preferredHiringCategories: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
-    corporateContactDetails: z.record(z.unknown()).optional(),
-    teamInformation: z.record(z.unknown()).optional(),
+    corporateContactDetails: z.record(z.string(), z.unknown()).optional(),
+    teamInformation: z.record(z.string(), z.unknown()).optional(),
     complete: z.boolean().optional(),
   }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: p.error.issues[0].message });

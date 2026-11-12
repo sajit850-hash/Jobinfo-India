@@ -20,7 +20,7 @@ institutionsRouter.post("/register", async (req, res) => {
     contactName: z.string().trim().min(2).max(100), email: z.string().trim().email().toLowerCase(),
     password: z.string().min(10).max(128), name: z.string().trim().min(2).max(180),
     phone: phoneSchema,
-    acceptTerms: z.literal(true, { errorMap: () => ({ message: "You must accept the Terms and Privacy Policy" }) }),
+    acceptTerms: z.literal(true, { error: "You must accept the Terms and Privacy Policy" }),
   }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: p.error.issues[0].message });
   if (await prisma.user.findFirst({ where: { OR: [{ email: p.data.email }, { phone: p.data.phone }] } })) {

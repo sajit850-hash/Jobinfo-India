@@ -15,6 +15,10 @@ export class LocalFileStorage implements ResumeStorage {
     return resolved;
   }
 
+  async check() {
+    await mkdir(this.root, { recursive: true, mode: 0o700 });
+  }
+
   async save(input: { ownerId: string; fileName: string; contentType: string; bytes: Buffer }) {
     const id = crypto.randomUUID();
     const key = `users/${input.ownerId}/${id}`;

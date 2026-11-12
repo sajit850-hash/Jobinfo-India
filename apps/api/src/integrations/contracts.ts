@@ -36,6 +36,7 @@ export interface PaymentProvider {
 }
 export interface ResumeStorage {
   readonly name: string;
+  check(): Promise<void>;
   save(input: { ownerId: string; fileName: string; contentType: string; bytes: Buffer }): Promise<{ key: string; size: number }>;
   read(key: string): Promise<{ bytes: Buffer; contentType: string; fileName: string }>;
   remove(key: string): Promise<void>;

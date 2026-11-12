@@ -16,7 +16,7 @@ jobsRouter.get("/drafts", requireAuth("RECRUITER"), async (req, res) => {
 });
 
 jobsRouter.post("/drafts", requireAuth("RECRUITER"), async (req, res) => {
-  const p = z.object({ data: z.record(z.unknown()).default({}), currentStep: z.number().int().min(1).max(12).default(1) }).safeParse(req.body || {});
+  const p = z.object({ data: z.record(z.string(), z.unknown()).default({}), currentStep: z.number().int().min(1).max(12).default(1) }).safeParse(req.body || {});
   if (!p.success) return res.status(400).json({ error: "Invalid draft" });
   const employer = await prisma.employer.findUnique({ where: { userId: userOf(req).id }, select: { id: true } });
   if (!employer) return res.status(404).json({ error: "Recruiter company profile not found" });
@@ -35,7 +35,7 @@ jobsRouter.get("/drafts/:id", requireAuth("RECRUITER"), async (req, res) => {
 });
 
 jobsRouter.patch("/drafts/:id", requireAuth("RECRUITER"), async (req, res) => {
-  const p = z.object({ data: z.record(z.unknown()), currentStep: z.number().int().min(1).max(12), expectedVersion: z.number().int().positive().optional() }).safeParse(req.body);
+  const p = z.object({ data: z.record(z.string(), z.unknown()), currentStep: z.number().int().min(1).max(12), expectedVersion: z.number().int().positive().optional() }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: "Invalid draft data" });
   const prior = await prisma.recruiterJobDraft.findFirst({ where: { jobId: String(req.params.id), ownerId: userOf(req).id } });
   if (!prior) return res.status(404).json({ error: "Draft not found" });
