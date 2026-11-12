@@ -8,7 +8,12 @@ const otpProvider = process.env.OTP_PROVIDER || "console";
 if (!["demo", "console", "http-json", "msg91", "twilio"].includes(otpProvider)) {
   throw new Error("OTP_PROVIDER must be demo, console, http-json, msg91, or twilio");
 }
-assertOtpProviderAllowed(otpProvider, process.env.NODE_ENV, process.env.OTP_DEMO_STAGING_ENABLED);
+assertOtpProviderAllowed(
+  otpProvider,
+  process.env.NODE_ENV,
+  process.env.OTP_DEMO_STAGING_ENABLED,
+  process.env.OTP_DEMO_PRODUCTION_ENABLED,
+);
 
 export const config = {
   isProd,

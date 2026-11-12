@@ -51,9 +51,9 @@ The web start command uses Render's assigned `PORT`. Set the API service's `WEB_
 
 ## 2.3 OTP provider modes
 
-Set `OTP_PROVIDER=demo` only for local development (`NODE_ENV=development`) or explicitly authorized staging (`NODE_ENV=staging` and `OTP_DEMO_STAGING_ENABLED=true`). Demo mode sends no SMS, stores no entered OTP, and accepts any exactly six-digit numeric code against an unexpired, unused phone-verification record. The API refuses to start with demo OTP mode in production.
+Set `OTP_PROVIDER=demo` for local development (`NODE_ENV=development`). Staging requires `NODE_ENV=staging` and `OTP_DEMO_STAGING_ENABLED=true`. Production demo OTP can be explicitly enabled with `NODE_ENV=production` and `OTP_DEMO_PRODUCTION_ENABLED=true`; this accepts any six-digit code for mobile and email verification on the public site. It sends no SMS or email and stores no entered OTP. Turn the production flag off and redeploy when public testing is complete.
 
-`OTP_PROVIDER=console` generates a development OTP and logs it locally. `OTP_PROVIDER=http-json` uses the configured generic SMS adapter. `msg91` and `twilio` are reserved until their provider adapters and credentials are configured. The frontend's `NEXT_PUBLIC_OTP_PROVIDER=demo` controls the local demo hint only; never set it for public production builds.
+`OTP_PROVIDER=console` generates a development OTP and logs it locally. `OTP_PROVIDER=http-json` uses the configured generic SMS adapter. `msg91` and `twilio` are reserved until their provider adapters and credentials are configured. The frontend's `NEXT_PUBLIC_OTP_PROVIDER=demo` controls the local demo hint only.
 
 Candidate, recruiter, and institution registrations use the same OTP issue and verification endpoints. Accounts with a phone number cannot log in or use authenticated routes until verification succeeds.
 
@@ -111,3 +111,4 @@ This checks API liveness, database readiness, and the public homepage. It does n
 - Launch only after the baseline migration, automated workflow tests, security review, monitoring, backup restore rehearsal, and live smoke checks pass.
 
 No VPS, domain, DNS, certificate, production database, or provider credentials are configured in this workspace, so those external launch actions remain operator tasks.
+
