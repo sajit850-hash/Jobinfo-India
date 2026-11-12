@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Page } from "@/components/SiteChrome";
@@ -10,14 +10,12 @@ type RegistrationKind = "candidate" | "recruiter" | "institution";
 type RecordRow = Record<string, string>;
 type Draft = Record<string, unknown>;
 
-const stages = ["Account", "Mobile OTP", "Email OTP", "Profile", "Done"];
+const stages = ["Account", "Profile", "Done"];
 const dashboard: Record<RegistrationKind, string> = {
   candidate: "/candidate/dashboard",
   recruiter: "/recruiter/dashboard",
   institution: "/institution/dashboard",
 };
-const demoOtpMessage = "Demo Verification Mode: Enter any 6-digit number to continue.";
-
 const recordFields: Record<RegistrationKind, { key: string; title: string; fields: [string, string, string][] }[]> = {
   candidate: [
     { key: "education", title: "Education", fields: [["institution", "College / university", "text"], ["degree", "Qualification / degree", "text"], ["field", "Course / specialization", "text"], ["passingYear", "Passing year", "number"], ["grade", "Grade / percentage", "text"]] },
@@ -102,13 +100,7 @@ export function RegistrationWizard({ kind }: { kind: RegistrationKind }) {
   );
   const [listEntries, setListEntries] = useState<Record<string, string[]>>({ departments: [""], courses: [""], passingYears: [""] });
   const [files, setFiles] = useState<Record<string, File[]>>({});
-  const [token, setToken] = useState("");
-  const [maskedPhone, setMaskedPhone] = useState("");
-  const [mobileVerified, setMobileVerified] = useState(false);
-  const [emailVerified, setEmailVerified] = useState(false);
-  const [demoMode, setDemoMode] = useState(process.env.NEXT_PUBLIC_OTP_PROVIDER === "demo");
-  const [mobileCode, setMobileCode] = useState("");
-  const [emailCode, setEmailCode] = useState("");
+  const [accountCreated, setAccountCreated] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -125,28 +117,21 @@ export function RegistrationWizard({ kind }: { kind: RegistrationKind }) {
 
   useEffect(() => {
     let active = true;
-    const existingToken = sessionStorage.getItem(storageKey);
-    if (!existingToken) {
-      try {
-        const accountDraft = sessionStorage.getItem(`${storageKey}-account`);
-        if (accountDraft) setValues((current) => ({ ...current, ...JSON.parse(accountDraft) as Record<string, string> }));
-      } catch {
-        sessionStorage.removeItem(`${storageKey}-account`);
-      }
-      setRestored(true);
-      return;
+    sessionStorage.removeItem(storageKey);
+    try {
+      const accountDraft = sessionStorage.getItem(`${storageKey}-account`);
+      if (accountDraft) setValues((current) => ({ ...current, ...JSON.parse(accountDraft) as Record<string, string> }));
+    } catch {
+      sessionStorage.removeItem(`${storageKey}-account`);
     }
-    setToken(existingToken);
-    sessionStorage.removeItem(`${storageKey}-account`);
-    void api<{ role: string; status: string; draft: Draft | null; mobileVerified: boolean; emailVerified: boolean; demoMode?: boolean }>(
-      `/api/v1/auth/registration/status?token=${encodeURIComponent(existingToken)}`,
-    ).then((result) => {
+    void api<{ role: string; status: string; draft: Draft | null }>("/api/v1/auth/registration/status").then((result) => {
       if (!active) return;
       if (!result.ok || result.data.role !== ({ candidate: "CANDIDATE", recruiter: "RECRUITER", institution: "INSTITUTION" } as const)[kind]) {
-        sessionStorage.removeItem(storageKey);
-        setToken("");
+        setRestored(true);
         return;
       }
+      setAccountCreated(true);
+      sessionStorage.removeItem(`${storageKey}-account`);
       const draft = result.data.draft ?? {};
       setValues((current) => ({ ...current, ...Object.fromEntries(
         Object.entries(draft).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
@@ -162,33 +147,28 @@ export function RegistrationWizard({ kind }: { kind: RegistrationKind }) {
         key,
         Array.isArray(draft[key]) && draft[key].length ? (draft[key] as unknown[]).map(String) : current[key],
       ])));
-      setMobileVerified(result.data.mobileVerified);
-      setEmailVerified(result.data.emailVerified);
-      setDemoMode(!!result.data.demoMode);
-      setMaskedPhone(String(draft.phone ?? "").replace(/^(\+91\d{2})\d{5}(\d{3})$/, "$1XXXXX$2"));
-      setStage(result.data.status === "REGISTRATION_COMPLETED" ? 5
-        : result.data.status === "PROFILE_INCOMPLETE" || result.data.status === "PROFILE_COMPLETED" ? 4 : 2);
+      setStage(result.data.status === "REGISTRATION_COMPLETED" ? 3 : 2);
       setRestored(true);
     });
     return () => { active = false; };
   }, [kind, storageKey]);
 
   useEffect(() => {
-    if (!restored || token || stage !== 1) return;
+    if (!restored || accountCreated || stage !== 1) return;
     sessionStorage.setItem(`${storageKey}-account`, JSON.stringify(values));
-  }, [restored, stage, storageKey, token, values]);
+  }, [accountCreated, restored, stage, storageKey, values]);
 
   useEffect(() => {
-    if (!restored || stage < 4 || !mobileVerified || !emailVerified || stage === 5) return;
+    if (!restored || !accountCreated || stage !== 2) return;
     const timer = window.setTimeout(() => {
       const draft = { ...values, ...rows, ...(kind === "institution" ? listEntries : {}), registrationType: kind };
       void api("/api/v1/auth/registration/draft", { method: "PUT", body: JSON.stringify({ draft }) });
     }, 750);
     return () => window.clearTimeout(timer);
-  }, [emailVerified, kind, listEntries, mobileVerified, restored, rows, stage, values]);
+  }, [accountCreated, kind, listEntries, restored, rows, stage, values]);
 
   useEffect(() => {
-    if (stage !== 5) return;
+    if (stage !== 3) return;
     const timer = window.setTimeout(() => router.replace(dashboard[kind]), 1500);
     return () => window.clearTimeout(timer);
   }, [kind, router, stage]);
@@ -203,7 +183,7 @@ export function RegistrationWizard({ kind }: { kind: RegistrationKind }) {
 
   const createAccount = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (token) {
+    if (accountCreated) {
       setStage(2);
       return;
     }
@@ -226,48 +206,13 @@ export function RegistrationWizard({ kind }: { kind: RegistrationKind }) {
         recruiterType: account.recruiterType || "CORPORATE",
       };
       const endpoint = kind === "candidate" ? "/api/v1/auth/register/candidate" : kind === "recruiter" ? "/api/v1/recruiters/register" : "/api/v1/institutions/register";
-      const result = await api<{ verificationToken: string; maskedPhone: string; demoMode: boolean }>(endpoint, { method: "POST", body: JSON.stringify(payload) });
+      const result = await api<{ role: string }>(endpoint, { method: "POST", body: JSON.stringify(payload) });
       if (!result.ok) return reportFailure(result.data.error || "Registration failed.");
-      sessionStorage.setItem(storageKey, result.data.verificationToken);
+      setAccountCreated(true);
       sessionStorage.removeItem(`${storageKey}-account`);
-      setToken(result.data.verificationToken);
-      setMaskedPhone(result.data.maskedPhone);
-      setDemoMode(result.data.demoMode);
       setValues((current) => ({ ...current, ...account, phone: account.phone || "" }));
       setStage(2);
-      setMessage(result.data.demoMode ? demoOtpMessage : `A mobile verification code was sent to ${result.data.maskedPhone}.`);
-    });
-  };
-
-  const sendEmailOtp = () => run(async () => {
-    const result = await api<{ demoMode?: boolean; devCode?: string }>("/api/v1/auth/email/verification/send", { method: "POST", body: "{}" });
-    if (!result.ok) return reportFailure(result.data.error || "Could not send the email verification code.");
-    setMessage(result.data.demoMode ? demoOtpMessage : result.data.devCode ? `Development email code: ${result.data.devCode}` : `Verification code sent to ${values.email}.`);
-  });
-
-  const verifyMobile = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    return run(async () => {
-      const result = await api("/api/v1/auth/otp/verify", { method: "POST", body: JSON.stringify({ token, code: mobileCode }) });
-      if (!result.ok) return reportFailure(result.data.error || "Mobile verification failed.");
-      setMobileVerified(true);
-      setMobileCode("");
-      setMessage("Mobile verified. Sending the email verification code…");
-      const mail = await api<{ demoMode?: boolean; devCode?: string }>("/api/v1/auth/email/verification/send", { method: "POST", body: "{}" });
-      if (!mail.ok) return reportFailure(mail.data.error || "Mobile verified, but email code could not be sent. Use Resend email code.");
-      setMessage(mail.data.demoMode ? `Mobile verified. ${demoOtpMessage}` : mail.data.devCode ? `Mobile verified. Development email code: ${mail.data.devCode}` : `Mobile verified. A code was sent to ${values.email}.`);
-    });
-  };
-
-  const verifyEmail = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    return run(async () => {
-      const result = await api("/api/v1/auth/email/verification/verify", { method: "POST", body: JSON.stringify({ code: emailCode }) });
-      if (!result.ok) return reportFailure(result.data.error || "Email verification failed.");
-      setEmailVerified(true);
-      setEmailCode("");
-      setStage(4);
-      setMessage("Both verification channels have been confirmed.");
+      setMessage("Your account is ready. Continue to your profile.");
     });
   };
 
@@ -338,7 +283,7 @@ export function RegistrationWizard({ kind }: { kind: RegistrationKind }) {
       setMessage("Your draft is saved. You can finish your profile from your dashboard.");
       return;
     }
-    setStage(5);
+    setStage(3);
     sessionStorage.removeItem(storageKey);
   });
 
@@ -357,7 +302,7 @@ export function RegistrationWizard({ kind }: { kind: RegistrationKind }) {
 
   return <Page><main className="formPage registrationWizard">
     <div className="steps" aria-label="Registration progress">{stages.map((label, index) => {
-      const currentStep = stage === 2 ? (mobileVerified ? 3 : 2) : stage;
+      const currentStep = stage;
       return <span key={label} style={{ display: "contents" }}>
       <span className={currentStep >= index + 1 ? "on" : ""} style={{ display: "flex", gap: 8, alignItems: "center" }}><span className="n">{index + 1}</span>{label}</span>
       {index < stages.length - 1 && <span className="bar" />}
@@ -366,48 +311,30 @@ export function RegistrationWizard({ kind }: { kind: RegistrationKind }) {
       {error && <div className="err" role="alert">{error}</div>}
       {message && <div className="info" role="status">{message}</div>}
       {!restored ? <p className="muted">Restoring your registration…</p> : <>
-        {stage === 1 && <><h1>{token ? "Your account" : `Create your ${title.toLowerCase()} account`}</h1>
+        {stage === 1 && <><h1>{accountCreated ? "Your account" : `Create your ${title.toLowerCase()} account`}</h1>
           <p className="sub">Progress is saved without storing your password. Required fields are marked.</p>
           <form onSubmit={createAccount}>
-            {kind === "institution" ? <label className="field">Institution name *<input name="name" required readOnly={!!token} value={values.name || ""} onChange={(e) => updateValue("name", e.target.value)} /></label>
-              : <label className="field">{accountTitle} *<input name="fullName" required minLength={2} readOnly={!!token} value={values.fullName || ""} onChange={(e) => updateValue("fullName", e.target.value)} /></label>}
-            {kind === "institution" && <label className="field">Contact person name *<input name="contactName" required readOnly={!!token} value={values.contactName || ""} onChange={(e) => updateValue("contactName", e.target.value)} /></label>}
-            <label className="field">Email address *<input name="email" type="email" required readOnly={!!token} value={emailValue} onChange={(e) => updateValue("email", e.target.value)} /></label>
-            <label className="field">Mobile number *<input name="phone" type="tel" required readOnly={!!token} value={values.phone || ""} onChange={(e) => updateValue("phone", e.target.value)} placeholder="+91 98XXXXXXXX" /></label>
+            {kind === "institution" ? <label className="field">Institution name *<input name="name" required readOnly={accountCreated} value={values.name || ""} onChange={(e) => updateValue("name", e.target.value)} /></label>
+              : <label className="field">{accountTitle} *<input name="fullName" required minLength={2} readOnly={accountCreated} value={values.fullName || ""} onChange={(e) => updateValue("fullName", e.target.value)} /></label>}
+            {kind === "institution" && <label className="field">Contact person name *<input name="contactName" required readOnly={accountCreated} value={values.contactName || ""} onChange={(e) => updateValue("contactName", e.target.value)} /></label>}
+            <label className="field">Email address *<input name="email" type="email" required readOnly={accountCreated} value={emailValue} onChange={(e) => updateValue("email", e.target.value)} /></label>
+            <label className="field">Mobile number *<input name="phone" type="tel" required readOnly={accountCreated} value={values.phone || ""} onChange={(e) => updateValue("phone", e.target.value)} placeholder="+91 98XXXXXXXX" /></label>
             {kind === "recruiter" && <>
-              <label className="field">Recruiter type *<select name="recruiterType" disabled={!!token} value={values.recruiterType || "CORPORATE"} onChange={(e) => updateValue("recruiterType", e.target.value)}><option value="FREELANCE">Freelance recruiter</option><option value="CORPORATE">Corporate recruiter</option></select></label>
-              {values.recruiterType !== "FREELANCE" && <label className="field">Company name *<input name="companyName" required={!token} readOnly={!!token} value={values.companyName || ""} onChange={(e) => updateValue("companyName", e.target.value)} /></label>}
+              <label className="field">Recruiter type *<select name="recruiterType" disabled={accountCreated} value={values.recruiterType || "CORPORATE"} onChange={(e) => updateValue("recruiterType", e.target.value)}><option value="FREELANCE">Freelance recruiter</option><option value="CORPORATE">Corporate recruiter</option></select></label>
+              {values.recruiterType !== "FREELANCE" && <label className="field">Company name *<input name="companyName" required={!accountCreated} readOnly={accountCreated} value={values.companyName || ""} onChange={(e) => updateValue("companyName", e.target.value)} /></label>}
             </>}
-            {!token && <>
-              <label className="field">Password *<input name="password" type="password" required minLength={10} autoComplete="new-password" /></label>
-              <label className="field">Confirm password *<input name="confirmPassword" type="password" required minLength={10} autoComplete="new-password" /></label>
+            {!accountCreated && <>
+              <label className="field">Password *<input name="password" type="password" required minLength={12} autoComplete="new-password" /></label>
+              <label className="field">Confirm password *<input name="confirmPassword" type="password" required minLength={12} autoComplete="new-password" /></label>
               <label className="check"><input name="terms" type="checkbox" required /> I accept the Terms and Privacy Policy</label>
             </>}
-            <button className="btn block" disabled={busy}>{busy ? "Please wait…" : token ? "Continue to verification" : "Continue"}</button>
+            <button className="btn block" disabled={busy}>{busy ? "Please wait…" : accountCreated ? "Continue to profile" : "Continue"}</button>
           </form>
-          <p className="center"><Link className="altLink" href="/login">Already registered? Sign in to resume</Link></p>
+          <p className="center"><Link className="altLink" href={kind === "candidate" ? "/candidate/login" : kind === "recruiter" ? "/recruiter/login" : "/institution/login"}>Already registered? Sign in to resume</Link></p>
         </>}
 
-        {stage === 2 && <><h1>{mobileVerified ? "Email OTP" : "Mobile OTP"}</h1>
-          <p className="sub">Verify both channels independently. Neither verification code is saved in your profile.</p>
-          <div className="verificationStatus"><p>{mobileVerified ? "✓ Mobile verified" : `Mobile: ${maskedPhone || values.phone || "not verified"}`}</p><p>{emailVerified ? "✓ Email verified" : `Email: ${emailValue || "not verified"}`}</p></div>
-          {!mobileVerified && <form onSubmit={verifyMobile}>
-            {demoMode && <p className="info">{demoOtpMessage}</p>}
-            <label className="field">Mobile verification code<input className="otp" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={mobileCode} onChange={(e) => setMobileCode(e.target.value.replace(/\D/g, "").slice(0, 6))} /></label>
-            <button className="btn block" disabled={busy || mobileCode.length !== 6}>{busy ? "Verifying…" : "Verify mobile"}</button>
-            <button type="button" className="linkBtn" onClick={() => void run(async () => { const r = await api<{ demoMode?: boolean; devCode?: string }>("/api/v1/auth/otp/resend", { method: "POST", body: JSON.stringify({ token }) }); if (!r.ok) reportFailure(r.data.error || "Could not resend code"); else { setDemoMode(!!r.data.demoMode); setMessage(r.data.demoMode ? demoOtpMessage : r.data.devCode ? `Development code: ${r.data.devCode}` : "A new mobile code was sent."); } })} disabled={busy}>Resend mobile code</button>
-          </form>}
-          {mobileVerified && !emailVerified && <form onSubmit={verifyEmail}>
-            {demoMode && <p className="info">{demoOtpMessage}</p>}
-            <p className="sub">A verification code will be sent to {emailValue}. {message}</p>
-            <label className="field">Email verification code<input className="otp" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={emailCode} onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, "").slice(0, 6))} /></label>
-            <button className="btn block" disabled={busy || emailCode.length !== 6}>{busy ? "Verifying…" : "Verify email"}</button>
-            <button type="button" className="linkBtn" onClick={sendEmailOtp} disabled={busy}>Resend email code</button>
-          </form>}
+        {stage === 2 && <><h1>{title} profile</h1><p className="sub">Your information is saved to your existing profile. Save a draft to finish later.</p>
           <button type="button" className="linkBtn" onClick={() => setStage(1)}>Previous</button>
-        </>}
-
-        {stage === 4 && <><h1>{title} profile</h1><p className="sub">Your information is saved to your existing profile. Save a draft to finish later.</p>
           {kind === "recruiter" && values.recruiterType === "CORPORATE" && <p className="notice warning">Company verification remains pending until reviewed by Jobinfo India.</p>}
           {kind === "institution" && <p className="notice warning">Institution verification remains pending until reviewed by Jobinfo India.</p>}
           <div className="registrationProfileGrid">{profileFields[kind].map(renderProfileField)}</div>
@@ -450,7 +377,7 @@ export function RegistrationWizard({ kind }: { kind: RegistrationKind }) {
           <div className="registrationActions"><button type="button" className="btn outline" disabled={busy} onClick={() => void saveProfile(false)}>{busy ? "Saving…" : "Save draft"}</button><button type="button" className="btn" disabled={busy} onClick={() => void saveProfile(true)}>{busy ? "Saving…" : "Complete registration"}</button></div>
         </>}
 
-        {stage === 5 && <div className="done"><div className="tick">✓</div><h1>Registration complete</h1><p className="sub">{kind === "candidate" ? "Your candidate profile is saved." : kind === "recruiter" ? "Your recruiter profile is saved. Corporate verification is pending where applicable." : "Your institution profile is saved and awaiting verification."}</p><Link className="btn block" href={dashboard[kind]}>Go to dashboard</Link></div>}
+        {stage === 3 && <div className="done"><div className="tick">✓</div><h1>Registration complete</h1><p className="sub">{kind === "candidate" ? "Your candidate profile is saved." : kind === "recruiter" ? "Your recruiter profile is saved. Corporate verification is pending where applicable." : "Your institution profile is saved and awaiting verification."}</p><Link className="btn block" href={dashboard[kind]}>Go to dashboard</Link></div>}
       </>}
     </section>
   </main></Page>;

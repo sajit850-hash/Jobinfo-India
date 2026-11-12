@@ -3,15 +3,15 @@
 ## Access and sessions
 
 - API routes use role-specific guards. Each authenticated request checks the account is active and the token's `sessionVersion` still matches the database.
-- Passwords are hashed with bcrypt. Authenticated password changes and email OTP resets revoke all existing sessions.
+- Passwords are hashed with bcrypt. Authenticated password changes and signed, expiring email-link resets revoke all existing sessions.
 - Authentication endpoints are limited to 30 requests per IP per 15 minutes; the API has a 300 request per IP per 15 minute limit. These defaults use in-process memory and need a shared store before running multiple API replicas.
-- OTPs are random six-digit values, stored as HMAC hashes, expire after 10 minutes, and allow five attempts. Resends are throttled.
+- Registration and login do not require OTP. Password reset links expire after 30 minutes, and database session-version checks prevent reuse.
 
 ## Messaging adapters
 
 The built-in `http-json` adapters provide a vendor-neutral HTTP contract:
 
-- SMS: set `OTP_PROVIDER=http-json`, `SMS_API_URL`, and `SMS_API_KEY`. The endpoint receives `{ "to": "...", "message": "...", "purpose": "..." }` as JSON with a bearer token.
+- SMS: optional future messaging integrations can use `OTP_PROVIDER=http-json`, `SMS_API_URL`, and `SMS_API_KEY`. The endpoint receives `{ "to": "...", "message": "...", "purpose": "..." }` as JSON with a bearer token; registration and login do not invoke SMS.
 - Email: set `EMAIL_PROVIDER=http-json`, `EMAIL_API_URL`, `EMAIL_API_KEY`, and optionally `EMAIL_FROM`. The endpoint receives `{ "from", "to", "subject", "text", "html" }` as JSON with a bearer token.
 - Messaging endpoints must use HTTPS outside development. Provider errors are not returned with credentials or response bodies.
 - Application confirmations and status changes create in-app notifications and attempt email delivery. An email delivery failure does not undo the in-app notification.

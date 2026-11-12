@@ -40,21 +40,11 @@ The bootstrap command refuses to create another admin if one already exists.
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) and [docs/PHASE-STATUS.md](docs/PHASE-STATUS.md). Docker Compose is included as a starting deployment setup.
 
-The current schema and verified relationship boundaries are documented in [docs/database-architecture.md](docs/database-architecture.md). The development seed is repeatable, refuses production, and never deletes existing jobs. To create local workflow accounts, set `SEED_DEMO_ACCOUNTS=true` before `npm run db:seed` (PowerShell: `$env:SEED_DEMO_ACCOUNTS='true'; npm run db:seed`). Demo accounts use `JobinfoDemo!2026` unless `SEED_DEMO_PASSWORD` overrides it:
-
-| Role | Login email |
-|---|---|
-| Candidate | `demo.candidate@example.com` |
-| Corporate recruiter | `demo.corporate@example.com` |
-| Freelance recruiter | `demo.freelance@example.com` |
-| Institution admin | `demo.institution@example.com` |
-| Administrator | `demo.admin@example.com` |
-
-These credentials are for a local development database only. Do not use the demo seed against production. Set `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` if you want the seed to create a separate initial admin; otherwise bootstrap one with the command above.
+The current schema and verified relationship boundaries are documented in [docs/database-architecture.md](docs/database-architecture.md). The development catalog seed adds standard plan records and refuses to run in production. It does not create user accounts. Bootstrap an initial administrator with the guarded `admin:create` command described above.
 
 ## Provider-independent development mode
 
-Use local adapters while API credentials are unavailable: `OTP_PROVIDER=console`, `EMAIL_PROVIDER=console`, and `PAYMENT_PROVIDER=mock`. Console OTP is displayed only in development. Mock checkout creates a test transaction and exposes a development-only confirmation endpoint; it never charges money. Production supports Razorpay payment links and generic HTTPS JSON SMS/email adapters when configured. Review [docs/INTEGRATION-ADAPTERS.md](docs/INTEGRATION-ADAPTERS.md) and [docs/SECURITY-OPERATIONS.md](docs/SECURITY-OPERATIONS.md). The admin integrations endpoint is `/api/v1/admin/integrations`.
+Registration and login use password authentication without OTP. Password recovery uses a time-limited email link, so configure `EMAIL_PROVIDER` for production; console email is development-only. SMS adapters remain configurable for future messaging and are not used to authenticate accounts. Production supports Razorpay payment links and generic HTTPS JSON SMS/email adapters when configured. Review [docs/INTEGRATION-ADAPTERS.md](docs/INTEGRATION-ADAPTERS.md) and [docs/SECURITY-OPERATIONS.md](docs/SECURITY-OPERATIONS.md). The admin integrations endpoint is `/api/v1/admin/integrations`.
 
 Run `npm run doctor` after creating `.env` to check the local environment configuration.
 

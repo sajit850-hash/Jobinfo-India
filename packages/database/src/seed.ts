@@ -1,10 +1,9 @@
-// Core catalog seed. Demo accounts and listings live only in the tracked demo:seed workflow.
+// Seed the normal catalog and, when explicitly configured, the initial administrator.
 import bcrypt from "bcryptjs";
 import { prisma } from "./index";
 
 async function main() {
   if (process.env.NODE_ENV === "production") throw new Error("The development catalog seed cannot run in production.");
-  if (process.env.SEED_DEMO_ACCOUNTS === "true") throw new Error("Untracked demo account seeding was removed. Use demo:seed against an authorized development or staging database.");
 
   const adminEmail = process.env.SEED_ADMIN_EMAIL?.trim().toLowerCase();
   const adminPassword = process.env.SEED_ADMIN_PASSWORD;

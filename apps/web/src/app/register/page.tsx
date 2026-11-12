@@ -10,8 +10,9 @@ export default function Register() {
         <div className="grid3">
           <Link className="card cat" href="/register/candidate"><b>Candidate</b><span>Create profile and apply →</span></Link>
           <Link className="card cat" href="/recruiter/register"><b>Recruiter / Employer</b><span>Post jobs and manage applicants →</span></Link>
-          <Link className="card cat" href="/institutions"><b>Institution</b><span>Showcase your campus →</span></Link>
+          <Link className="card cat" href="/institutions/register"><b>Institution</b><span>Showcase your campus →</span></Link>
         </div>
+        <p className="center">Already have an account? <Link href="/login">Choose your login</Link></p>
       </section>
     </Page>
   );

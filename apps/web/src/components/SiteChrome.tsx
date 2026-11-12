@@ -28,6 +28,7 @@ export function Header() {
           <summary aria-label="Open site navigation">Menu</summary>
           <nav aria-label="Mobile navigation">
             {links.map(([label, href]) => <Link href={href} key={href}>{label}</Link>)}
+            <Link href="/login">Login</Link><Link href="/register">Register</Link>
             <Link href="/about">About us</Link><Link href="/contact">Contact</Link><Link href="/faqs">FAQs</Link>
           </nav>
         </details>

@@ -2,8 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { prisma, Prisma } from "@jobinfo/database";
-import { requireAuth, signOtpToken, userOf } from "../auth";
-import { issueOtp } from "../otp";
+import { requireAuth, setSession, userOf } from "../auth";
 import { phoneSchema } from "../validation";
 
 export const institutionsRouter = Router();
@@ -18,7 +17,7 @@ institutionsRouter.get("/", async (req, res) => {
 institutionsRouter.post("/register", async (req, res) => {
   const p = z.object({
     contactName: z.string().trim().min(2).max(100), email: z.string().trim().email().toLowerCase(),
-    password: z.string().min(10).max(128), name: z.string().trim().min(2).max(180),
+    password: z.string().min(12, "Minimum 12 characters").max(128), name: z.string().trim().min(2).max(180),
     phone: phoneSchema,
     acceptTerms: z.literal(true, { error: "You must accept the Terms and Privacy Policy" }),
   }).safeParse(req.body);
@@ -33,27 +32,16 @@ institutionsRouter.post("/register", async (req, res) => {
       fullName: p.data.contactName,
       passwordHash: await bcrypt.hash(p.data.password, 12),
       role: "INSTITUTION",
-      isActive: false,
+      isActive: true,
       termsAcceptedAt: new Date(),
+      registrationStatus: "PROFILE_INCOMPLETE",
       registrationDraft: { contactName: p.data.contactName, email: p.data.email, phone: p.data.phone, name: p.data.name, registrationType: "INSTITUTION" },
       institution: { create: { name: p.data.name, city: "", state: "", verified: false } },
     },
     select: { id: true, email: true, role: true }
   });
-  try {
-    const otp = await issueOtp(user.id, p.data.phone);
-    if (!otp.ok) {
-      await prisma.user.delete({ where: { id: user.id } });
-      return res.status(429).json({ error: `Please wait ${otp.retryAfter}s before requesting another code` });
-    }
-    res.status(201).json({
-      ok: true, verificationToken: signOtpToken(user.id), maskedPhone: p.data.phone.slice(0, 3) + "XXXXX" + p.data.phone.slice(-3),
-      demoMode: otp.demoMode, devCode: otp.devCode, message: "Verify your mobile number to finish registration.",
-    });
-  } catch (error) {
-    await prisma.user.delete({ where: { id: user.id } });
-    res.status(503).json({ error: error instanceof Error ? error.message : "SMS provider is unavailable." });
-  }
+  setSession(res, user);
+  res.status(201).json({ ok: true, role: user.role });
 });
 institutionsRouter.get("/me", requireAuth("INSTITUTION"), async (req, res) => {
   const institution = await prisma.institution.findUnique({
@@ -108,8 +96,6 @@ institutionsRouter.patch("/me", requireAuth("INSTITUTION"), async (req, res) => 
   if (!p.success) return res.status(400).json({ error: p.error.issues[0].message });
   const { complete, departments, courses, website, ...fields } = p.data;
   const userId = userOf(req).id;
-  const account = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { phoneVerifiedAt: true, emailVerifiedAt: true } });
-  if (!account.phoneVerifiedAt || !account.emailVerifiedAt) return res.status(403).json({ error: "Verify both mobile and email before saving your profile" });
   if (complete && (!fields.name?.trim() || !fields.city?.trim() || !fields.state?.trim() || !(departments?.length || courses?.length))) {
     return res.status(400).json({ error: "Institution name, city, state, and at least one department or course are required to complete the profile" });
   }

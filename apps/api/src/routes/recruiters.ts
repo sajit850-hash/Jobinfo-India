@@ -2,8 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { prisma, Prisma } from "@jobinfo/database";
-import { requireAuth, signOtpToken, userOf } from "../auth";
-import { issueOtp } from "../otp";
+import { requireAuth, setSession, userOf } from "../auth";
 import { phoneSchema } from "../validation";
 
 export const recruitersRouter = Router();
@@ -12,7 +11,7 @@ recruitersRouter.post("/register", async (req, res) => {
   const p = z.object({
     fullName: z.string().trim().min(2).max(100),
     email: z.string().trim().toLowerCase().email(),
-    password: z.string().min(10).max(128),
+    password: z.string().min(12, "Minimum 12 characters").max(128),
     recruiterType: z.enum(["FREELANCE", "CORPORATE"]),
     companyName: z.string().trim().min(2).max(150).optional(),
     phone: phoneSchema,
@@ -27,27 +26,16 @@ recruitersRouter.post("/register", async (req, res) => {
   const user = await prisma.user.create({
     data: {
       email: d.email, fullName: d.fullName, phone: d.phone,
-      passwordHash: await bcrypt.hash(d.password, 12), role: "RECRUITER", isActive: false, termsAcceptedAt: new Date(),
+      passwordHash: await bcrypt.hash(d.password, 12), role: "RECRUITER", isActive: true, termsAcceptedAt: new Date(),
+      registrationStatus: "PROFILE_INCOMPLETE",
       registrationDraft: { fullName: d.fullName, email: d.email, phone: d.phone, recruiterType: d.recruiterType, registrationType: "RECRUITER" },
       employer: { create: { name: d.companyName || d.fullName, city: d.city, recruiterType: d.recruiterType, industry: d.recruiterType === "FREELANCE" ? "Freelance Recruitment" : undefined } }
     },
     select: { id: true, email: true, fullName: true, role: true }
   });
-  try {
-    const otp = await issueOtp(user.id, d.phone);
-    if (!otp.ok) {
-      await prisma.user.delete({ where: { id: user.id } });
-      return res.status(429).json({ error: `Please wait ${otp.retryAfter}s before requesting another code` });
-    }
-    await prisma.auditLog.create({ data: { actorId: user.id, action: "RECRUITER_REGISTERED", entityType: "User", entityId: user.id } });
-    res.status(201).json({
-      ok: true, verificationToken: signOtpToken(user.id), maskedPhone: d.phone.slice(0, 3) + "XXXXX" + d.phone.slice(-3),
-      demoMode: otp.demoMode, devCode: otp.devCode, message: "Verify your mobile number to finish registration.",
-    });
-  } catch (error) {
-    await prisma.user.delete({ where: { id: user.id } });
-    res.status(503).json({ error: error instanceof Error ? error.message : "SMS provider is unavailable." });
-  }
+  await prisma.auditLog.create({ data: { actorId: user.id, action: "RECRUITER_REGISTERED", entityType: "User", entityId: user.id } });
+  setSession(res, user);
+  res.status(201).json({ ok: true, role: user.role });
 });
 
 recruitersRouter.use(requireAuth("RECRUITER"));
@@ -94,8 +82,6 @@ recruitersRouter.patch("/me", async (req, res) => {
   if (!p.success) return res.status(400).json({ error: p.error.issues[0].message });
   const { complete, fullName, recruiterLinkedinUrl, companyLinkedinUrl, website, corporateContactDetails, teamInformation, ...fields } = p.data;
   const userId = userOf(req).id;
-  const account = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { phoneVerifiedAt: true, emailVerifiedAt: true } });
-  if (!account.phoneVerifiedAt || !account.emailVerifiedAt) return res.status(403).json({ error: "Verify both mobile and email before saving your profile" });
   if (complete && (!fields.name?.trim() || !fields.city?.trim() || !fields.industry?.trim())) {
     return res.status(400).json({ error: "Company or recruiter name, industry, and city are required to complete the profile" });
   }

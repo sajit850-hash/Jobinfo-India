@@ -23,6 +23,7 @@ const permission = (name: string) => async (req: any, res: any, next: any) => {
   if (rule && !rule.enabled) return res.status(403).json({ error: `Admin access is disabled for ${name}` });
   next();
 };
+adminRouter.use("/demo-data", (_req, res) => res.status(404).json({ error: "Not found" }));
 adminRouter.get("/demo-data/batches", permission("MANAGE_DEMO_DATA"), async (_req, res) => {
   const batches = await prisma.demoSeedBatch.findMany({ orderBy: { createdAt: "desc" } });
   const counts = await prisma.demoDataRecord.groupBy({ by: ["batchId"], where: { deletedAt: null }, _count: { _all: true } });
@@ -217,12 +218,10 @@ adminRouter.get("/reports", permission("VIEW_REPORTS"), async (_req, res) => {
   res.json({ months, totals: { users: users.length, jobs: jobs.length, applications: applications.length, revenuePaise: months.reduce((sum, x) => sum + x.revenuePaise, 0), gstCollectedPaise: months.reduce((sum, x) => sum + x.gstPaise, 0), activeSubscriptions: subscriptions.filter((x) => x.status === "ACTIVE").length }, cases });
 });
 adminRouter.get("/overview", async (_req, res) => {
-  const [users,candidates,recruiters,institutions,companies,jobs,pendingJobs,applications,subscriptions,demoUsers,demoJobs,demoStudents,demoTransactions] = await Promise.all([
+  const [users,candidates,recruiters,institutions,companies,jobs,pendingJobs,applications,subscriptions] = await Promise.all([
     prisma.user.count(), prisma.user.count({where:{role:"CANDIDATE"}}), prisma.user.count({where:{role:"RECRUITER"}}),
     prisma.institution.count(), prisma.company.count(), prisma.job.count(), prisma.job.count({where:{status:{in:["PENDING_REVIEW","PENDING_APPROVAL"]}}}),
     prisma.application.count(), prisma.subscription.count({where:{status:"ACTIVE"}}),
-    prisma.demoDataRecord.count({where:{recordType:"User",deletedAt:null,batch:{status:"ACTIVE"}}}), prisma.demoDataRecord.count({where:{recordType:"Job",deletedAt:null,batch:{status:"ACTIVE"}}}),
-    prisma.demoDataRecord.count({where:{recordType:"InstitutionStudent",deletedAt:null,batch:{status:"ACTIVE"}}}), prisma.paymentTransaction.count({where:{status:"DEMO"}})
   ]);
   const [roleCounts, jobStatuses, applicationStatuses, paymentRevenue, postingRevenue, subscriptionRevenue, openCases, recentUsers] = await Promise.all([
     prisma.user.groupBy({ by: ["role"], _count: true }),
@@ -234,7 +233,7 @@ adminRouter.get("/overview", async (_req, res) => {
     prisma.billingCase.count({ where: { status: { in: ["OPEN", "REVIEWING"] } } }),
     prisma.user.findMany({ orderBy: { createdAt: "desc" }, take: 8, select: { id: true, fullName: true, email: true, role: true, createdAt: true } }),
   ]);
-  res.json({ users,candidates,recruiters,institutions,companies,jobs,pendingJobs,applications,activeSubscriptions:subscriptions,demoData:{users:demoUsers,jobs:demoJobs,students:demoStudents,transactions:demoTransactions},
+  res.json({ users,candidates,recruiters,institutions,companies,jobs,pendingJobs,applications,activeSubscriptions:subscriptions,
     analytics: { roleCounts, jobStatuses, applicationStatuses, revenuePaise: [...paymentRevenue, ...postingRevenue].reduce((total, item) => total + Math.max(0, item.amountPaise - item.taxPaise - item.refundedPaise), 0), gstCollectedPaise: [...paymentRevenue, ...postingRevenue].reduce((total, item) => total + Math.max(0, item.taxPaise - (item.refundedPaise >= item.amountPaise ? item.taxPaise : 0)), 0), payments: paymentRevenue.length + postingRevenue.length, activeSubscriptionValuePaise: subscriptionRevenue._sum.amountPaise || 0, openCases, recentUsers } });
 });
 adminRouter.get("/users", permission("MANAGE_USERS"), async (req,res) => {

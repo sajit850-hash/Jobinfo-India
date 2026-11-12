@@ -16,7 +16,8 @@ class ConsoleEmailProvider implements EmailProvider {
   readonly name = "console";
   async send(input: { to: string; subject: string; text: string }) {
     if (config.isProd) throw new Error("Console email provider is development-only.");
-    console.info(`[DEV EMAIL] to=${input.to} subject=${input.subject}\n${input.text}`);
+    const safeText = input.text.replace(/([?&]token=)[^&\s]+/g, "$1[redacted]");
+    console.info(`[DEV EMAIL] to=${input.to} subject=${input.subject}\n${safeText}`);
   }
 }
 class MockPaymentProvider implements PaymentProvider {
@@ -49,7 +50,6 @@ export function getSmsProvider(): SmsProvider {
   if (sms) return sms;
   if (config.otpProvider === "http-json") return new HttpJsonSmsProvider();
   if (config.otpProvider === "console" && !config.isProd) return new ConsoleSmsProvider();
-  if (config.otpProvider === "demo") throw new Error("Demo OTP mode does not send SMS.");
   throw new Error("SMS provider is not configured. Add a provider adapter and credentials.");
 }
 export function getEmailProvider(): EmailProvider {
@@ -75,7 +75,7 @@ export async function checkResumeStorage() {
 }
 export function integrationStatus() {
   return {
-    sms: sms?.name || (config.otpProvider === "http-json" ? "HTTP JSON adapter" : config.otpProvider === "console" && !config.isProd ? "console (development)" : config.otpProvider === "demo" ? "demo (development only)" : "not configured"),
+    sms: sms?.name || (config.otpProvider === "http-json" ? "HTTP JSON adapter" : config.otpProvider === "console" && !config.isProd ? "console (development)" : "not configured"),
     email: email?.name || (process.env.EMAIL_PROVIDER === "http-json" ? "HTTP JSON adapter" : (process.env.EMAIL_PROVIDER || "console") === "console" && !config.isProd ? "console (development)" : "not configured"),
     payment: payment?.name || (process.env.PAYMENT_PROVIDER === "razorpay" ? "razorpay" : process.env.PAYMENT_PROVIDER === "mock" && !config.isProd ? "mock (test only)" : "not configured"),
     resumeStorage: storage?.name || ((process.env.FILE_STORAGE || "local") === "local" ? "private local disk" : process.env.FILE_STORAGE === "s3" ? "private S3-compatible object storage" : "not configured"),

@@ -18,7 +18,7 @@ npm test
 
 ## 2. Prepare production configuration
 
-Create `.env` on the VPS and keep it out of source control. Configure stable random secrets, PostgreSQL credentials, HTTPS origins, transactional email, OTP SMS, payment gateway keys/webhook secret, private object storage, and monitoring/backup credentials. Never use `console` email/SMS, mock payments, or local resume storage for public traffic.
+Create `.env` on the VPS and keep it out of source control. Configure stable random secrets, PostgreSQL credentials, HTTPS origins, transactional email for password reset links, payment gateway keys/webhook secret, private object storage, and monitoring/backup credentials. Never use `console` email, mock payments, or local resume storage for public traffic. Registration and login do not use OTP; SMS integrations are optional and are not an authentication prerequisite.
 
 Run the production configuration gate without displaying secret values:
 
@@ -51,13 +51,9 @@ Deploy the Next.js frontend as a separate Render Web Service using the repositor
 
 The web start command uses Render's assigned `PORT`. Set the API service's `WEB_ORIGIN` to the frontend service URL so browser API requests pass CORS checks.
 
-## 2.3 OTP provider modes
+## 2.3 Authentication and password recovery
 
-Set `OTP_PROVIDER=demo` for local development (`NODE_ENV=development`). Staging requires `NODE_ENV=staging` and `OTP_DEMO_STAGING_ENABLED=true`. Production demo OTP can be explicitly enabled with `NODE_ENV=production` and `OTP_DEMO_PRODUCTION_ENABLED=true`; this accepts any six-digit code for mobile and email verification on the public site. It sends no SMS or email and stores no entered OTP. Turn the production flag off and redeploy when public testing is complete.
-
-`OTP_PROVIDER=console` generates a development OTP and logs it locally. `OTP_PROVIDER=http-json` uses the configured generic SMS adapter. `msg91` and `twilio` are reserved until their provider adapters and credentials are configured. The frontend's `NEXT_PUBLIC_OTP_PROVIDER=demo` controls the local demo hint only.
-
-Candidate, recruiter, and institution registrations use the same OTP issue and verification endpoints. Accounts with a phone number cannot log in or use authenticated routes until verification succeeds.
+Candidate, recruiter, and institution registration create active password-authenticated accounts and begin an authenticated session. Login and profile access do not depend on mobile or email OTP verification; the verification timestamps remain unset unless verified through a future supported workflow. Password recovery uses a signed, single-use email link that expires after 30 minutes. Configure a production email provider and set `WEB_ORIGIN` to the public frontend origin. SMS integrations are optional and are not used for authentication.
 
 ## 3. Database migration gate
 
@@ -109,8 +105,7 @@ This checks API liveness, database readiness, and the public homepage. It does n
 - Configure uptime checks for `/health` and `/ready`, application error alerts, disk/database capacity alerts, and provider webhook failure alerts.
 - Configure encrypted off-host PostgreSQL and private-upload backups. Run the documented backup and restore scripts against the deployment and rehearse recovery before launch.
 - Verify DNS, certificate renewal, firewall rules, cookie security, provider webhooks, email/SMS delivery, and payment reconciliation.
-- Run and record the full release matrix: candidate registration/verification/profile/search/apply; recruiter registration/company/job posting/application management/ATS; institution approval/student placement; admin moderation/access/billing/refunds; payment success/failure/webhook replay; API validation, access control, OTP limits, upload privacy, and load checks.
+- Run and record the full release matrix: candidate registration/profile/search/apply; recruiter registration/company/job posting/application management/ATS; institution approval/student placement; admin moderation/access/billing/refunds; payment success/failure/webhook replay; API validation, access control, password reset link expiry/replay, upload privacy, and load checks.
 - Launch only after the baseline migration, automated workflow tests, security review, monitoring, backup restore rehearsal, and live smoke checks pass.
 
 No VPS, domain, DNS, certificate, production database, or provider credentials are configured in this workspace, so those external launch actions remain operator tasks.
-

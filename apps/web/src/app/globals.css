@@ -122,6 +122,14 @@ small{font-size:11px;color:var(--muted)}
 .field{display:block;margin-bottom:16px;font-weight:500}
 .field input,.field select{display:block;width:100%;margin-top:6px;border:1px solid var(--line);border-radius:9px;padding:12px 14px;font:inherit;background:#fff}
 .field input:focus,.field select:focus{outline:2px solid #bfdbfe;border-color:var(--blue)}
+.passwordInput{display:flex;align-items:center;margin-top:6px;border:1px solid var(--line);border-radius:9px;background:#fff}
+.passwordInput input.field,.passwordInput input{flex:1;min-width:0;margin:0;border:0;background:transparent}
+.passwordInput:focus-within{outline:2px solid #bfdbfe;border-color:var(--blue)}
+.passwordToggle{margin-right:8px;padding:7px 10px;border:0;border-radius:6px;background:var(--soft);color:var(--blue);font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+.loginOptions{margin:24px 0}
+.loginOptions .cat{display:grid;gap:8px}
+.loginOptions .cat span{color:var(--muted)}
+.loginOptions .cat span:last-child{color:var(--blue);font-weight:600}
 .check{display:flex;gap:10px;align-items:center;color:var(--muted);margin:4px 0 18px}
 .err{background:#fef2f2;color:#b91c1c;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px}
 .info{background:#eff6ff;color:#1d4ed8;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px}

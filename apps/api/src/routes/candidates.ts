@@ -74,8 +74,6 @@ candidatesRouter.put("/me", async (req, res) => {
   const { fullName, skills, education, certifications, workExperience, complete: requestedComplete, dateOfBirth, ...rest } = p.data;
   const complete = requestedComplete ?? true;
   const cand = await prisma.candidate.findUniqueOrThrow({ where: { userId: userOf(req).id } });
-  const account = await prisma.user.findUniqueOrThrow({ where: { id: userOf(req).id }, select: { phoneVerifiedAt: true, emailVerifiedAt: true } });
-  if (!account.phoneVerifiedAt || !account.emailVerifiedAt) return res.status(403).json({ error: "Verify both mobile and email before saving your profile" });
   if (complete && (!rest.headline?.trim() || !rest.city?.trim() || (!skills.length && !education.length && !workExperience.length))) {
     return res.status(400).json({ error: "Add a headline, current city, and at least one skill, education record, or experience record to complete your profile" });
   }
@@ -166,9 +164,8 @@ candidatesRouter.put("/me/resume", async (req, res) => {
   } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "Could not save resume" }); }
 });
 candidatesRouter.get("/me/resume", async (req, res) => {
-  const candidate = await prisma.candidate.findUnique({ where: { userId: userOf(req).id }, select: { id: true, resumeUrl: true } });
+  const candidate = await prisma.candidate.findUnique({ where: { userId: userOf(req).id }, select: { resumeUrl: true } });
   if (!candidate?.resumeUrl) return res.status(404).json({ error: "No resume uploaded" });
-  if (candidate.resumeUrl.startsWith("demo://resume/")) return res.status(200).type("text/plain").attachment("demo-resume.txt").send(`JOBINFO INDIA — DEMO RESUME\n\nCandidate ID: ${candidate.id}\nThis fictional text resume is provided for staging dashboard testing.\nNo real candidate information is included.\n`);
   return streamPrivateFile(candidate.resumeUrl, res, "attachment");
 });
 candidatesRouter.delete("/me/resume", async (req, res) => {
