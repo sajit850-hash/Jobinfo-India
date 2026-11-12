@@ -1,5 +1,5 @@
-export const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
-export const API_SERVER = process.env.API_INTERNAL_URL || API;
+export const API = "";
+export const API_SERVER = process.env.API_INTERNAL_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
 export type Job = {
   id: string; title: string; company: string; verified: boolean; location: string;
