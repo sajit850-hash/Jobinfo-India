@@ -6,6 +6,7 @@ import { prisma, Prisma } from "@jobinfo/database";
 import { clearSession, readOtpToken, readSession, requireAuth, setSession, signOtpToken, userOf } from "../auth";
 import { checkOtp, issueEmailOtp, issueOtp } from "../otp";
 import { phoneSchema } from "../validation";
+import { config } from "../config";
 
 export const authRouter = Router();
 const limiter = rateLimit({ windowMs: 15 * 60_000, limit: 30, standardHeaders: true, legacyHeaders: false });
@@ -108,6 +109,7 @@ authRouter.get("/registration/status", async (req, res) => {
     draft: user.registrationDraft,
     mobileVerified: Boolean(user.phoneVerifiedAt),
     emailVerified: Boolean(user.emailVerifiedAt),
+    demoMode: config.otpProvider === "demo",
   });
 });
 
@@ -218,3 +220,4 @@ authRouter.get("/me", async (req, res) => {
   const { sessionVersion: _sessionVersion, isActive: _isActive, ...safeUser } = u;
   res.json({ user: safeUser });
 });
+
