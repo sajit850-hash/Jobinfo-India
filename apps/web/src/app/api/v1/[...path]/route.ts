@@ -3,8 +3,14 @@ import { API_SERVER } from "@/lib/api";
 async function proxy(request: Request) {
   const incomingUrl = new URL(request.url);
   const origin = request.headers.get("origin");
-  if (origin && new URL(origin).origin !== incomingUrl.origin) {
-    return Response.json({ error: "Request origin is not allowed." }, { status: 403 });
+  if (origin) {
+    const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0].trim();
+    const host = forwardedHost || request.headers.get("host") || incomingUrl.host;
+    const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0].trim();
+    const expectedOrigin = `${forwardedProto || incomingUrl.protocol.slice(0, -1)}://${host}`;
+    if (new URL(origin).origin !== expectedOrigin) {
+      return Response.json({ error: "Request origin is not allowed." }, { status: 403 });
+    }
   }
   const targetUrl = new URL(`${incomingUrl.pathname}${incomingUrl.search}`, API_SERVER);
   const headers = new Headers(request.headers);
