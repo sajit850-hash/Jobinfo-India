@@ -5,7 +5,7 @@ Next.js 15 + React 19 frontend, Express API, PostgreSQL and Prisma. The reposito
 ## Local setup
 
 1. Install Node.js 22 and PostgreSQL 16.
-2. `cp .env.example .env` and configure `DATABASE_URL`, `JWT_SECRET` (32+ random characters), `WEB_ORIGIN`, `NEXT_PUBLIC_API_URL` and `API_INTERNAL_URL`.
+2. Copy `.env.example` to `.env` and configure `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `JWT_SECRET` (32+ random characters), `WEB_ORIGIN`, `NEXT_PUBLIC_API_URL` and `API_INTERNAL_URL`. For Neon, link the intended project/branch with the Neon CLI, then run `neon env pull --file .env`; this application uses pooled `DATABASE_URL` for runtime and `DATABASE_URL_UNPOOLED` for Prisma direct connections/migrations. Verify the selected branch before running migrations.
 3. `npm ci`
 4. `npm run db:generate`
 5. `npm run db:migrate --workspace @jobinfo/database`

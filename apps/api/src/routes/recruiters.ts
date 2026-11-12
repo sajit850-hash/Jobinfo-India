@@ -216,5 +216,6 @@ recruitersRouter.get("/candidates/:candidateId", async (req, res) => {
     workExperience: { orderBy: { startDate: "desc" } },
   } });
   if (!candidate) return res.status(404).json({ error: "Candidate profile not found or is private" });
+  await prisma.candidateProfileView.create({ data: { candidateId: candidate.id, recruiterId: userOf(req).id, source: "RECRUITER_PROFILE" } });
   res.json({ candidate });
 });

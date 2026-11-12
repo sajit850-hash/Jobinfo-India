@@ -26,4 +26,3 @@ export function assertOtpProviderAllowed(
     throw new Error("OTP_PROVIDER=demo requires development mode or an explicit staging/production opt-in");
   }
 }
-

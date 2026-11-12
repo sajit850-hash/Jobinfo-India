@@ -6,7 +6,7 @@ test("accepts exactly six numeric OTP digits", () => {
   for (const code of ["123456", "654321", "111111", "987654", "000000"]) {
     assert.equal(isValidOtpCode(code), true, `${code} should be valid`);
   }
-  for (const code of ["12345", "1234567", "12a456", "ï¼‘ï¼’ï¼“ï¼”ï¼•ï¼–", ""]) {
+  for (const code of ["12345", "1234567", "12a456", "１２３４５６", ""]) {
     assert.equal(isValidOtpCode(code), false, `${code} should be invalid`);
   }
 });
@@ -38,4 +38,3 @@ test("arbitrary OTPs are accepted only for an unexpired demo-provider phone code
   assert.equal(acceptsDemoOtp("123456", "console", "demo"), false);
   assert.equal(acceptsDemoOtp("123456", "demo", "console"), false);
 });
-

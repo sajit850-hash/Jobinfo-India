@@ -5,7 +5,13 @@
   "scripts": {
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "tsx src/seed.ts",
+    "demo:seed": "tsx src/demo-seed.ts",
+    "db:seed:demo": "tsx src/demo-seed.ts",
+    "demo:verify": "tsx src/demo-verify.ts",
+    "demo:credentials": "tsx src/demo-credentials.ts",
+    "demo:complete": "tsx src/demo-complete.ts",
     "db:studio": "prisma studio",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

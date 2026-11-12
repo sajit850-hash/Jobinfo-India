@@ -90,6 +90,41 @@ model User {
   taxInvoices TaxInvoice[]
   otpCodes  OtpCode[]
   notifications Notification[]
+  adminProfile AdminProfile?
+  recruiterInterviews Interview[] @relation("RecruiterInterviews")
+  recruiterCandidateViews CandidateProfileView[] @relation("RecruiterCandidateViews")
+}
+
+model AdminProfile {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  accessLevel String
+  permissions String[] @default([])
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model DemoSeedBatch {
+  id        String   @id @default(cuid())
+  batchKey  String   @unique
+  label     String
+  status    String   @default("ACTIVE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  records   DemoDataRecord[]
+}
+
+model DemoDataRecord {
+  id        String   @id @default(cuid())
+  batchId   String
+  recordType String
+  recordId  String
+  userId    String?
+  createdAt DateTime @default(now())
+  deletedAt DateTime?
+  batch     DemoSeedBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  @@unique([batchId, recordType, recordId])
+  @@index([batchId, recordType])
+  @@index([userId])
 }
 
 /// One-time passwords. Real codes are hashed; demo verification inputs are never stored.
@@ -150,6 +185,7 @@ model Candidate {
   certifications Certification[]
   workExperience WorkExperience[]
   savedJobs    SavedJob[]
+  profileViews CandidateProfileView[]
 
   @@index([searchable, updatedAt])
 }
@@ -210,9 +246,28 @@ model Employer {
   corporateContactDetails Json?
   verificationDocumentKeys String[] @default([])
   teamInformation Json?
+  companyId String?
 
   user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
   jobs Job[]
+  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+}
+
+model Company {
+  id String @id @default(cuid())
+  name String @unique
+  website String?
+  industry String?
+  size String?
+  description String?
+  address String?
+  city String?
+  state String?
+  country String @default("India")
+  logoKey String?
+  verified Boolean @default(false)
+  createdAt DateTime @default(now())
+  recruiters Employer[]
 }
 
 model Job {
@@ -488,10 +543,51 @@ model Application {
   candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
   job       Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
   screeningAnswers JobScreeningAnswer[]
+  statusHistory ApplicationStatusHistory[]
+  interviews Interview[]
 
   @@unique([candidateId, jobId])
   @@index([candidateId, appliedAt])
   @@index([jobId, appliedAt])
+}
+
+model ApplicationStatusHistory {
+  id String @id @default(cuid())
+  applicationId String
+  previousStatus ApplicationStatus?
+  newStatus ApplicationStatus
+  note String?
+  changedAt DateTime @default(now())
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  @@index([applicationId, changedAt])
+}
+
+model Interview {
+  id String @id @default(cuid())
+  applicationId String
+  recruiterId String
+  scheduledAt DateTime
+  status String @default("SCHEDULED")
+  mode String @default("VIDEO")
+  location String?
+  meetingUrl String?
+  notes String?
+  createdAt DateTime @default(now())
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  recruiter User @relation("RecruiterInterviews", fields: [recruiterId], references: [id], onDelete: Cascade)
+  @@index([recruiterId, scheduledAt])
+}
+
+model CandidateProfileView {
+  id String @id @default(cuid())
+  candidateId String
+  recruiterId String
+  viewedAt DateTime @default(now())
+  source String?
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  recruiter User @relation("RecruiterCandidateViews", fields: [recruiterId], references: [id], onDelete: Cascade)
+  @@index([candidateId, viewedAt])
+  @@index([recruiterId, viewedAt])
 }
 
 model Institution {

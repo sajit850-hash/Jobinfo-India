@@ -26,8 +26,10 @@ yarn-debug.log*
 .wrangler/
 
 .data/
+.local/
 backups/
 .neon/
+.neon
 .claude/
 CLAUDE.md
 legacy-prototype/

@@ -17,10 +17,167 @@ cmsRouter.get("/:slug", async (req, res) => {
 adminRouter.use(requireAuth("ADMIN"));
 const audit = (req: any, action: string, entityType: string, entityId?: string, metadata?: any) => prisma.auditLog.create({ data: { actorId: userOf(req).id, action, entityType, entityId, metadata } });
 const permission = (name: string) => async (req: any, res: any, next: any) => {
+  const adminProfile = await prisma.adminProfile.findUnique({ where: { userId: userOf(req).id }, select: { permissions: true } });
+  if (adminProfile && !adminProfile.permissions.includes(name)) return res.status(403).json({ error: `Your admin access profile does not allow ${name}` });
   const rule = await prisma.rolePermission.findUnique({ where: { role_permission: { role: "ADMIN", permission: name } } });
   if (rule && !rule.enabled) return res.status(403).json({ error: `Admin access is disabled for ${name}` });
   next();
 };
+adminRouter.get("/demo-data/batches", permission("MANAGE_DEMO_DATA"), async (_req, res) => {
+  const batches = await prisma.demoSeedBatch.findMany({ orderBy: { createdAt: "desc" } });
+  const counts = await prisma.demoDataRecord.groupBy({ by: ["batchId"], where: { deletedAt: null }, _count: { _all: true } });
+  const countByBatch = new Map(counts.map(row => [row.batchId, row._count._all]));
+  res.json({ batches: batches.map(batch => ({ ...batch, _count: { records: countByBatch.get(batch.id) || 0 } })) });
+});
+adminRouter.get("/demo-data/batches/:id/records", permission("MANAGE_DEMO_DATA"), async (req, res) => {
+  const batchId = String(req.params.id);
+  const records = await prisma.demoDataRecord.findMany({ where: { batchId, deletedAt: null }, orderBy: [{ recordType: "asc" }, { createdAt: "asc" }], select: { id: true, recordType: true, recordId: true, userId: true, createdAt: true } });
+  res.json({ records });
+});
+adminRouter.get("/demo-data/batches/:id/users", permission("MANAGE_DEMO_DATA"), async (req, res) => {
+  const batchId = String(req.params.id);
+  const role = z.enum(["CANDIDATE", "RECRUITER", "INSTITUTION", "ADMIN"]).safeParse(req.query.role);
+  const q = String(req.query.q || "").trim().slice(0, 100);
+  const records = await prisma.demoDataRecord.findMany({ where: { batchId, recordType: "User", deletedAt: null }, select: { recordId: true } });
+  const users = await prisma.user.findMany({ where: { id: { in: records.map(row => row.recordId) }, ...(role.success ? { role: role.data as any } : {}), ...(q ? { OR: [{ id: { contains: q, mode: "insensitive" } }, { fullName: { contains: q, mode: "insensitive" } }, { email: { contains: q, mode: "insensitive" } }] } : {}) }, select: { id: true, fullName: true, email: true, role: true, isActive: true, createdAt: true, employer: { select: { name: true, company: { select: { name: true } } } }, institution: { select: { name: true } } }, orderBy: [{ role: "asc" }, { fullName: "asc" }] });
+  res.json({ users, total: users.length });
+});
+adminRouter.delete("/demo-data/users/:userId", permission("MANAGE_DEMO_DATA"), async (req, res) => {
+  const userId = String(req.params.userId);
+  const confirm = z.object({ confirmUserId: z.string().min(1) }).safeParse(req.body);
+  if (!confirm.success || confirm.data.confirmUserId !== userId) return res.status(400).json({ error: "Type the demo user ID to confirm deletion" });
+  if (userId === userOf(req).id) return res.status(409).json({ error: "You cannot delete your currently signed-in administrator account." });
+  const ownership = await prisma.demoDataRecord.findFirst({ where: { recordType: "User", recordId: userId, deletedAt: null }, include: { batch: true } });
+  if (!ownership || ownership.batch.status !== "ACTIVE") return res.status(404).json({ error: "Active demo user not found" });
+  const batchId = ownership.batchId;
+  const target = await prisma.user.findUnique({ where: { id: userId }, include: { candidate: true, employer: true, institution: true } });
+  if (!target) return res.status(404).json({ error: "Demo user not found" });
+  const [batchUsers, batchCandidates, batchJobs, billingRecords, institutionStudents, institutionDepartments, institutionCourses, institutionPlacements, ownedCandidateTracked, ownedEmployerTracked, ownedInstitutionTracked] = await Promise.all([
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "User", deletedAt: null }, select: { recordId: true } }),
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "Candidate", deletedAt: null }, select: { recordId: true } }),
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "Job", deletedAt: null }, select: { recordId: true } }),
+    prisma.demoDataRecord.findMany({ where: { batchId, userId, deletedAt: null, recordType: { in: ["Subscription", "PaymentTransaction", "TaxInvoice"] } }, select: { recordType: true, recordId: true } }),
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "InstitutionStudent", deletedAt: null }, select: { recordId: true } }),
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "Department", deletedAt: null }, select: { recordId: true } }),
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "InstitutionCourse", deletedAt: null }, select: { recordId: true } }),
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "InstitutionPlacement", deletedAt: null }, select: { recordId: true } }),
+    target.candidate ? prisma.demoDataRecord.findFirst({ where: { batchId, recordType: "Candidate", recordId: target.candidate.id, deletedAt: null }, select: { id: true } }) : null,
+    target.employer ? prisma.demoDataRecord.findFirst({ where: { batchId, recordType: "Employer", recordId: target.employer.id, deletedAt: null }, select: { id: true } }) : null,
+    target.institution ? prisma.demoDataRecord.findFirst({ where: { batchId, recordType: "Institution", recordId: target.institution.id, deletedAt: null }, select: { id: true } }) : null,
+  ]);
+  const allUserIds = batchUsers.map(row => row.recordId), candidateIds = batchCandidates.map(row => row.recordId), jobIds = batchJobs.map(row => row.recordId);
+  const ownedCandidateIds = target.candidate ? [target.candidate.id] : [];
+  const ownedJobIds = target.employer ? (await prisma.job.findMany({ where: { employerId: target.employer.id }, select: { id: true } })).map(row => row.id) : [];
+  const untrackedOwnedJob = ownedJobIds.some(id => !jobIds.includes(id));
+  const institutionId = target.institution?.id;
+  const [externalApplication, externalSavedJob, externalTeamMember, externalDraft, externalProfileView, untrackedInstitutionRows, untrackedBilling] = await Promise.all([
+    prisma.application.findFirst({ where: { OR: [ { candidateId: { in: ownedCandidateIds }, jobId: { notIn: jobIds } }, { jobId: { in: ownedJobIds }, candidateId: { notIn: candidateIds } } ] }, select: { id: true } }),
+    prisma.savedJob.findFirst({ where: { OR: [ { candidateId: { in: ownedCandidateIds }, jobId: { notIn: jobIds } }, { jobId: { in: ownedJobIds }, candidateId: { notIn: candidateIds } } ] }, select: { jobId: true } }),
+    prisma.jobTeamMember.findFirst({ where: { OR: [ { jobId: { in: ownedJobIds }, userId: { notIn: allUserIds } }, { userId, jobId: { notIn: jobIds } } ] }, select: { id: true } }),
+    prisma.recruiterJobDraft.findFirst({ where: { OR: [ { jobId: { in: ownedJobIds }, ownerId: { notIn: allUserIds } }, { ownerId: userId, jobId: { notIn: jobIds } } ] }, select: { id: true } }),
+    prisma.candidateProfileView.findFirst({ where: { OR: [ { candidateId: { in: ownedCandidateIds }, recruiterId: { notIn: allUserIds } }, { recruiterId: userId, candidateId: { notIn: candidateIds } } ] }, select: { id: true } }),
+    institutionId ? Promise.all([
+      prisma.institutionStudent.findFirst({ where: { institutionId, id: { notIn: institutionStudents.map(row => row.recordId) } }, select: { id: true } }),
+      prisma.department.findFirst({ where: { institutionId, id: { notIn: institutionDepartments.map(row => row.recordId) } }, select: { id: true } }),
+      prisma.institutionCourse.findFirst({ where: { institutionId, id: { notIn: institutionCourses.map(row => row.recordId) } }, select: { id: true } }),
+      prisma.institutionPlacement.findFirst({ where: { student: { institutionId }, id: { notIn: institutionPlacements.map(row => row.recordId) } }, select: { id: true } }),
+    ]).then(rows => rows.some(Boolean)) : false,
+    Promise.all([
+      prisma.subscription.findFirst({ where: { userId, id: { notIn: billingRecords.filter(row => row.recordType === "Subscription").map(row => row.recordId) } }, select: { id: true } }),
+      prisma.paymentTransaction.findFirst({ where: { userId, id: { notIn: billingRecords.filter(row => row.recordType === "PaymentTransaction").map(row => row.recordId) } }, select: { id: true } }),
+      prisma.taxInvoice.findFirst({ where: { userId, id: { notIn: billingRecords.filter(row => row.recordType === "TaxInvoice").map(row => row.recordId) } }, select: { id: true } }),
+      prisma.jobPostingTransaction.findFirst({ where: { userId }, select: { id: true } }),
+    ]).then(rows => rows.some(Boolean)),
+  ]);
+  if ((target.candidate && !ownedCandidateTracked) || (target.employer && !ownedEmployerTracked) || (target.institution && !ownedInstitutionTracked) || untrackedOwnedJob || externalApplication || externalSavedJob || externalTeamMember || externalDraft || externalProfileView || untrackedInstitutionRows || untrackedBilling) return res.status(409).json({ error: "This account has links to non-demo activity or untracked records. Remove those links before deletion." });
+  const appIds = (await prisma.application.findMany({ where: { OR: [ { candidateId: { in: ownedCandidateIds } }, { jobId: { in: ownedJobIds } } ] }, select: { id: true } })).map(row => row.id);
+  const statusIds = (await prisma.applicationStatusHistory.findMany({ where: { applicationId: { in: appIds } }, select: { id: true } })).map(row => row.id);
+  const interviewIds = (await prisma.interview.findMany({ where: { OR: [ { applicationId: { in: appIds } }, { recruiterId: userId } ] }, select: { id: true } })).map(row => row.id);
+  const savedRows = await prisma.savedJob.findMany({ where: { OR: [ { candidateId: { in: ownedCandidateIds } }, { jobId: { in: ownedJobIds } } ] }, select: { candidateId: true, jobId: true } });
+  const viewIds = (await prisma.candidateProfileView.findMany({ where: { OR: [ { candidateId: { in: ownedCandidateIds } }, { recruiterId: userId } ] }, select: { id: true } })).map(row => row.id);
+  const subscriptionIds = billingRecords.filter(row => row.recordType === "Subscription").map(row => row.recordId), paymentIds = billingRecords.filter(row => row.recordType === "PaymentTransaction").map(row => row.recordId), invoiceIds = billingRecords.filter(row => row.recordType === "TaxInvoice").map(row => row.recordId);
+  const dependentRecords = [
+    ...appIds.map(recordId => ({ batchId, recordType: "Application", recordId })), ...statusIds.map(recordId => ({ batchId, recordType: "ApplicationStatusHistory", recordId })),
+    ...interviewIds.map(recordId => ({ batchId, recordType: "Interview", recordId })), ...savedRows.map(row => ({ batchId, recordType: "SavedJob", recordId: `${row.candidateId}:${row.jobId}` })),
+    ...viewIds.map(recordId => ({ batchId, recordType: "CandidateProfileView", recordId })),
+  ];
+  await prisma.$transaction(async tx => {
+    if (institutionId) await tx.institution.delete({ where: { id: institutionId } });
+    await tx.taxInvoice.deleteMany({ where: { id: { in: invoiceIds } } });
+    await tx.paymentTransaction.deleteMany({ where: { id: { in: paymentIds } } });
+    await tx.subscription.deleteMany({ where: { id: { in: subscriptionIds } } });
+    if (dependentRecords.length) await tx.demoDataRecord.updateMany({ where: { OR: dependentRecords, deletedAt: null }, data: { deletedAt: new Date() } });
+    await tx.demoDataRecord.updateMany({ where: { batchId, deletedAt: null, OR: [{ userId }, { recordId: userId }] }, data: { deletedAt: new Date() } });
+    await tx.user.delete({ where: { id: userId } });
+    const companyId = target.employer?.companyId;
+    if (companyId && (await tx.employer.count({ where: { companyId } })) === 0) {
+      await tx.company.deleteMany({ where: { AND: [{ id: companyId }, { id: { in: (await tx.demoDataRecord.findMany({ where: { batchId, recordType: "Company", deletedAt: null }, select: { recordId: true } })).map(row => row.recordId) } }] } });
+      await tx.demoDataRecord.updateMany({ where: { batchId, recordType: "Company", recordId: companyId, deletedAt: null }, data: { deletedAt: new Date() } });
+    }
+  });
+  await audit(req, "DEMO_USER_DELETED", "User", userId, { batchId, role: target.role });
+  res.json({ ok: true, userId, status: "DELETED" });
+});
+adminRouter.delete("/demo-data/batches/:id", permission("MANAGE_DEMO_DATA"), async (req, res) => {
+  const batchId = String(req.params.id);
+  const confirmation = z.object({ confirmBatchKey: z.string().min(1) }).safeParse(req.body);
+  if (!confirmation.success) return res.status(400).json({ error: "Type the batch key to confirm deletion" });
+  const batch = await prisma.demoSeedBatch.findUnique({ where: { id: batchId } });
+  if (!batch || batch.batchKey !== confirmation.data.confirmBatchKey) return res.status(404).json({ error: "Batch not found or confirmation did not match" });
+  const [userRecords, jobRecords, candidateRecords, institutionRecords, companyRecords, studentRecords, departmentRecords, courseRecords, placementRecords, subscriptionRecords, paymentRecords, invoiceRecords, subscriptionPlanRecords] = await Promise.all([
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "User", deletedAt: null }, select: { recordId: true } }),
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "Job", deletedAt: null }, select: { recordId: true } }),
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "Candidate", deletedAt: null }, select: { recordId: true } }),
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "Institution", deletedAt: null }, select: { recordId: true } }),
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "Company", deletedAt: null }, select: { recordId: true } }),
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "InstitutionStudent", deletedAt: null }, select: { recordId: true } }),
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "Department", deletedAt: null }, select: { recordId: true } }),
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "InstitutionCourse", deletedAt: null }, select: { recordId: true } }),
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "InstitutionPlacement", deletedAt: null }, select: { recordId: true } }),
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "Subscription", deletedAt: null }, select: { recordId: true } }),
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "PaymentTransaction", deletedAt: null }, select: { recordId: true } }),
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "TaxInvoice", deletedAt: null }, select: { recordId: true } }),
+    prisma.demoDataRecord.findMany({ where: { batchId, recordType: "SubscriptionPlan", deletedAt: null }, select: { recordId: true } }),
+  ]);
+  const jobIds = jobRecords.map(x => x.recordId), candidateIds = candidateRecords.map(x => x.recordId), userIds = userRecords.map(x => x.recordId);
+  if (userIds.includes(userOf(req).id)) return res.status(409).json({ error: "Sign in as a different administrator before deleting a batch that contains your current account." });
+  const institutionIds = institutionRecords.map(x => x.recordId), companyIds = companyRecords.map(x => x.recordId);
+  const [externalApplication, externalSavedJob, externalTeamMember, externalDraft, externalCompanyMember, externalProfileView, externalPlanSubscription, untrackedInstitutionData, protectedBillingRecord] = await Promise.all([
+    prisma.application.findFirst({ where: { OR: [ { jobId: { in: jobIds }, candidateId: { notIn: candidateIds } }, { candidateId: { in: candidateIds }, jobId: { notIn: jobIds } } ] }, select: { id: true } }),
+    prisma.savedJob.findFirst({ where: { OR: [ { jobId: { in: jobIds }, candidateId: { notIn: candidateIds } }, { candidateId: { in: candidateIds }, jobId: { notIn: jobIds } } ] }, select: { jobId: true } }),
+    prisma.jobTeamMember.findFirst({ where: { jobId: { in: jobIds }, userId: { notIn: userIds } }, select: { id: true } }),
+    prisma.recruiterJobDraft.findFirst({ where: { jobId: { in: jobIds }, ownerId: { notIn: userIds } }, select: { id: true } }),
+    prisma.employer.findFirst({ where: { companyId: { in: companyIds }, userId: { notIn: userIds } }, select: { id: true } }),
+    prisma.candidateProfileView.findFirst({ where: { OR: [ { candidateId: { in: candidateIds }, recruiterId: { notIn: userIds } }, { recruiterId: { in: userIds }, candidateId: { notIn: candidateIds } } ] }, select: { id: true } }),
+    prisma.subscription.findFirst({ where: { planCode: { in: (await prisma.subscriptionPlan.findMany({ where: { id: { in: subscriptionPlanRecords.map(x => x.recordId) } }, select: { code: true } })).map(row => row.code) }, id: { notIn: subscriptionRecords.map(x => x.recordId) } }, select: { id: true } }),
+    Promise.all([
+      prisma.institutionStudent.findFirst({ where: { institutionId: { in: institutionIds }, id: { notIn: studentRecords.map(x => x.recordId) } }, select: { id: true } }),
+      prisma.department.findFirst({ where: { institutionId: { in: institutionIds }, id: { notIn: departmentRecords.map(x => x.recordId) } }, select: { id: true } }),
+      prisma.institutionCourse.findFirst({ where: { institutionId: { in: institutionIds }, id: { notIn: courseRecords.map(x => x.recordId) } }, select: { id: true } }),
+      prisma.institutionPlacement.findFirst({ where: { student: { institutionId: { in: institutionIds } }, id: { notIn: placementRecords.map(x => x.recordId) } }, select: { id: true } }),
+    ]).then(rows => rows.some(Boolean)),
+    Promise.all([
+      prisma.subscription.findFirst({ where: { userId: { in: userIds }, id: { notIn: subscriptionRecords.map(x => x.recordId) } }, select: { id: true } }),
+      prisma.paymentTransaction.findFirst({ where: { userId: { in: userIds }, id: { notIn: paymentRecords.map(x => x.recordId) } }, select: { id: true } }),
+      prisma.taxInvoice.findFirst({ where: { userId: { in: userIds }, id: { notIn: invoiceRecords.map(x => x.recordId) } }, select: { id: true } }),
+      prisma.jobPostingTransaction.findFirst({ where: { userId: { in: userIds } }, select: { id: true } }),
+    ]).then(rows => rows.some(Boolean)),
+  ]);
+  if (externalApplication || externalSavedJob || externalTeamMember || externalDraft || externalCompanyMember || externalProfileView || externalPlanSubscription || untrackedInstitutionData || protectedBillingRecord) return res.status(409).json({ error: "This batch is linked to non-demo activity, untracked institution data, or protected billing records. Remove those links before deletion." });
+  await prisma.$transaction(async tx => {
+    await tx.taxInvoice.deleteMany({ where: { id: { in: invoiceRecords.map(x => x.recordId) } } });
+    await tx.paymentTransaction.deleteMany({ where: { id: { in: paymentRecords.map(x => x.recordId) } } });
+    await tx.subscription.deleteMany({ where: { id: { in: subscriptionRecords.map(x => x.recordId) } } });
+    await tx.subscriptionPlan.deleteMany({ where: { id: { in: subscriptionPlanRecords.map(x => x.recordId) } } });
+    await tx.institution.deleteMany({ where: { id: { in: institutionIds } } });
+    await tx.company.deleteMany({ where: { id: { in: companyRecords.map(x => x.recordId) } } });
+    await tx.user.deleteMany({ where: { id: { in: userRecords.map(x => x.recordId) } } });
+    await tx.demoDataRecord.updateMany({ where: { batchId, deletedAt: null }, data: { deletedAt: new Date() } });
+    await tx.demoSeedBatch.update({ where: { id: batchId }, data: { status: "DELETED" } });
+  });
+  await audit(req, "DEMO_BATCH_DELETED", "DemoSeedBatch", batchId, { recordCount: (await prisma.demoDataRecord.count({ where: { batchId } })) });
+  res.json({ ok: true, batchId, status: "DELETED" });
+});
 adminRouter.get("/integrations", async (_req,res) => res.json({ integrations: { ...integrationStatus(), ai: (await customAiStatus()).enabled ? "custom API" : "keyword baseline" } }));
 adminRouter.get("/integrations/custom-ai", permission("MANAGE_INTEGRATIONS"), async (_req, res) => {
   const status = await customAiStatus(); res.json({ integration: status });
@@ -60,10 +217,12 @@ adminRouter.get("/reports", permission("VIEW_REPORTS"), async (_req, res) => {
   res.json({ months, totals: { users: users.length, jobs: jobs.length, applications: applications.length, revenuePaise: months.reduce((sum, x) => sum + x.revenuePaise, 0), gstCollectedPaise: months.reduce((sum, x) => sum + x.gstPaise, 0), activeSubscriptions: subscriptions.filter((x) => x.status === "ACTIVE").length }, cases });
 });
 adminRouter.get("/overview", async (_req, res) => {
-  const [users,candidates,recruiters,institutions,jobs,pendingJobs,applications,subscriptions] = await Promise.all([
+  const [users,candidates,recruiters,institutions,companies,jobs,pendingJobs,applications,subscriptions,demoUsers,demoJobs,demoStudents,demoTransactions] = await Promise.all([
     prisma.user.count(), prisma.user.count({where:{role:"CANDIDATE"}}), prisma.user.count({where:{role:"RECRUITER"}}),
-    prisma.institution.count(), prisma.job.count(), prisma.job.count({where:{status:{in:["PENDING_REVIEW","PENDING_APPROVAL"]}}}),
-    prisma.application.count(), prisma.subscription.count({where:{status:"ACTIVE"}})
+    prisma.institution.count(), prisma.company.count(), prisma.job.count(), prisma.job.count({where:{status:{in:["PENDING_REVIEW","PENDING_APPROVAL"]}}}),
+    prisma.application.count(), prisma.subscription.count({where:{status:"ACTIVE"}}),
+    prisma.demoDataRecord.count({where:{recordType:"User",deletedAt:null,batch:{status:"ACTIVE"}}}), prisma.demoDataRecord.count({where:{recordType:"Job",deletedAt:null,batch:{status:"ACTIVE"}}}),
+    prisma.demoDataRecord.count({where:{recordType:"InstitutionStudent",deletedAt:null,batch:{status:"ACTIVE"}}}), prisma.paymentTransaction.count({where:{status:"DEMO"}})
   ]);
   const [roleCounts, jobStatuses, applicationStatuses, paymentRevenue, postingRevenue, subscriptionRevenue, openCases, recentUsers] = await Promise.all([
     prisma.user.groupBy({ by: ["role"], _count: true }),
@@ -75,7 +234,7 @@ adminRouter.get("/overview", async (_req, res) => {
     prisma.billingCase.count({ where: { status: { in: ["OPEN", "REVIEWING"] } } }),
     prisma.user.findMany({ orderBy: { createdAt: "desc" }, take: 8, select: { id: true, fullName: true, email: true, role: true, createdAt: true } }),
   ]);
-  res.json({ users,candidates,recruiters,institutions,jobs,pendingJobs,applications,activeSubscriptions:subscriptions,
+  res.json({ users,candidates,recruiters,institutions,companies,jobs,pendingJobs,applications,activeSubscriptions:subscriptions,demoData:{users:demoUsers,jobs:demoJobs,students:demoStudents,transactions:demoTransactions},
     analytics: { roleCounts, jobStatuses, applicationStatuses, revenuePaise: [...paymentRevenue, ...postingRevenue].reduce((total, item) => total + Math.max(0, item.amountPaise - item.taxPaise - item.refundedPaise), 0), gstCollectedPaise: [...paymentRevenue, ...postingRevenue].reduce((total, item) => total + Math.max(0, item.taxPaise - (item.refundedPaise >= item.amountPaise ? item.taxPaise : 0)), 0), payments: paymentRevenue.length + postingRevenue.length, activeSubscriptionValuePaise: subscriptionRevenue._sum.amountPaise || 0, openCases, recentUsers } });
 });
 adminRouter.get("/users", permission("MANAGE_USERS"), async (req,res) => {

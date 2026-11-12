@@ -166,8 +166,9 @@ candidatesRouter.put("/me/resume", async (req, res) => {
   } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "Could not save resume" }); }
 });
 candidatesRouter.get("/me/resume", async (req, res) => {
-  const candidate = await prisma.candidate.findUnique({ where: { userId: userOf(req).id }, select: { resumeUrl: true } });
+  const candidate = await prisma.candidate.findUnique({ where: { userId: userOf(req).id }, select: { id: true, resumeUrl: true } });
   if (!candidate?.resumeUrl) return res.status(404).json({ error: "No resume uploaded" });
+  if (candidate.resumeUrl.startsWith("demo://resume/")) return res.status(200).type("text/plain").attachment("demo-resume.txt").send(`JOBINFO INDIA — DEMO RESUME\n\nCandidate ID: ${candidate.id}\nThis fictional text resume is provided for staging dashboard testing.\nNo real candidate information is included.\n`);
   return streamPrivateFile(candidate.resumeUrl, res, "attachment");
 });
 candidatesRouter.delete("/me/resume", async (req, res) => {
@@ -190,8 +191,12 @@ candidatesRouter.put("/me/photo", async (req, res) => {
   } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "Could not save photo" }); }
 });
 candidatesRouter.get("/me/photo", async (req, res) => {
-  const candidate = await prisma.candidate.findUnique({ where: { userId: userOf(req).id }, select: { profilePhotoKey: true } });
+  const candidate = await prisma.candidate.findUnique({ where: { userId: userOf(req).id }, select: { profilePhotoKey: true, user: { select: { fullName: true } } } });
   if (!candidate?.profilePhotoKey) return res.status(404).json({ error: "No profile photo uploaded" });
+  if (candidate.profilePhotoKey.startsWith("demo-avatar-")) {
+    const initials = candidate.user.fullName.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part.replace(/[^a-z]/gi, "").slice(0, 1).toUpperCase()).join("") || "JD";
+    return res.status(200).type("image/svg+xml").send(`<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><rect width="256" height="256" rx="128" fill="#e7eefc"/><text x="128" y="150" text-anchor="middle" font-family="Arial,sans-serif" font-size="82" font-weight="700" fill="#3157a4">${initials}</text></svg>`);
+  }
   return streamPrivateFile(candidate.profilePhotoKey, res, "inline");
 });
 candidatesRouter.delete("/me/photo", async (req, res) => {

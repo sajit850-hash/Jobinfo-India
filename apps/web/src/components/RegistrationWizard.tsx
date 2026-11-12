@@ -252,7 +252,7 @@ export function RegistrationWizard({ kind }: { kind: RegistrationKind }) {
       if (!result.ok) return reportFailure(result.data.error || "Mobile verification failed.");
       setMobileVerified(true);
       setMobileCode("");
-      setMessage("Mobile verified. Sending the email verification codeâ€¦");
+      setMessage("Mobile verified. Sending the email verification code…");
       const mail = await api<{ demoMode?: boolean; devCode?: string }>("/api/v1/auth/email/verification/send", { method: "POST", body: "{}" });
       if (!mail.ok) return reportFailure(mail.data.error || "Mobile verified, but email code could not be sent. Use Resend email code.");
       setMessage(mail.data.demoMode ? `Mobile verified. ${demoOtpMessage}` : mail.data.devCode ? `Mobile verified. Development email code: ${mail.data.devCode}` : `Mobile verified. A code was sent to ${values.email}.`);
@@ -365,7 +365,7 @@ export function RegistrationWizard({ kind }: { kind: RegistrationKind }) {
     <section className="formCard">
       {error && <div className="err" role="alert">{error}</div>}
       {message && <div className="info" role="status">{message}</div>}
-      {!restored ? <p className="muted">Restoring your registrationâ€¦</p> : <>
+      {!restored ? <p className="muted">Restoring your registration…</p> : <>
         {stage === 1 && <><h1>{token ? "Your account" : `Create your ${title.toLowerCase()} account`}</h1>
           <p className="sub">Progress is saved without storing your password. Required fields are marked.</p>
           <form onSubmit={createAccount}>
@@ -383,25 +383,25 @@ export function RegistrationWizard({ kind }: { kind: RegistrationKind }) {
               <label className="field">Confirm password *<input name="confirmPassword" type="password" required minLength={10} autoComplete="new-password" /></label>
               <label className="check"><input name="terms" type="checkbox" required /> I accept the Terms and Privacy Policy</label>
             </>}
-            <button className="btn block" disabled={busy}>{busy ? "Please waitâ€¦" : token ? "Continue to verification" : "Continue"}</button>
+            <button className="btn block" disabled={busy}>{busy ? "Please wait…" : token ? "Continue to verification" : "Continue"}</button>
           </form>
           <p className="center"><Link className="altLink" href="/login">Already registered? Sign in to resume</Link></p>
         </>}
 
         {stage === 2 && <><h1>{mobileVerified ? "Email OTP" : "Mobile OTP"}</h1>
           <p className="sub">Verify both channels independently. Neither verification code is saved in your profile.</p>
-          <div className="verificationStatus"><p>{mobileVerified ? "âœ“ Mobile verified" : `Mobile: ${maskedPhone || values.phone || "not verified"}`}</p><p>{emailVerified ? "âœ“ Email verified" : `Email: ${emailValue || "not verified"}`}</p></div>
+          <div className="verificationStatus"><p>{mobileVerified ? "✓ Mobile verified" : `Mobile: ${maskedPhone || values.phone || "not verified"}`}</p><p>{emailVerified ? "✓ Email verified" : `Email: ${emailValue || "not verified"}`}</p></div>
           {!mobileVerified && <form onSubmit={verifyMobile}>
             {demoMode && <p className="info">{demoOtpMessage}</p>}
             <label className="field">Mobile verification code<input className="otp" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={mobileCode} onChange={(e) => setMobileCode(e.target.value.replace(/\D/g, "").slice(0, 6))} /></label>
-            <button className="btn block" disabled={busy || mobileCode.length !== 6}>{busy ? "Verifyingâ€¦" : "Verify mobile"}</button>
+            <button className="btn block" disabled={busy || mobileCode.length !== 6}>{busy ? "Verifying…" : "Verify mobile"}</button>
             <button type="button" className="linkBtn" onClick={() => void run(async () => { const r = await api<{ demoMode?: boolean; devCode?: string }>("/api/v1/auth/otp/resend", { method: "POST", body: JSON.stringify({ token }) }); if (!r.ok) reportFailure(r.data.error || "Could not resend code"); else { setDemoMode(!!r.data.demoMode); setMessage(r.data.demoMode ? demoOtpMessage : r.data.devCode ? `Development code: ${r.data.devCode}` : "A new mobile code was sent."); } })} disabled={busy}>Resend mobile code</button>
           </form>}
           {mobileVerified && !emailVerified && <form onSubmit={verifyEmail}>
             {demoMode && <p className="info">{demoOtpMessage}</p>}
             <p className="sub">A verification code will be sent to {emailValue}. {message}</p>
             <label className="field">Email verification code<input className="otp" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={emailCode} onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, "").slice(0, 6))} /></label>
-            <button className="btn block" disabled={busy || emailCode.length !== 6}>{busy ? "Verifyingâ€¦" : "Verify email"}</button>
+            <button className="btn block" disabled={busy || emailCode.length !== 6}>{busy ? "Verifying…" : "Verify email"}</button>
             <button type="button" className="linkBtn" onClick={sendEmailOtp} disabled={busy}>Resend email code</button>
           </form>}
           <button type="button" className="linkBtn" onClick={() => setStage(1)}>Previous</button>
@@ -447,12 +447,11 @@ export function RegistrationWizard({ kind }: { kind: RegistrationKind }) {
             <label className="field">Accreditation documents<input type="file" multiple accept=".pdf,image/jpeg,image/png,application/pdf" onChange={(e) => setFiles((current) => ({ ...current, institutionAccreditation: Array.from(e.target.files ?? []) }))} /></label>
             <label className="field">Affiliation documents<input type="file" multiple accept=".pdf,image/jpeg,image/png,application/pdf" onChange={(e) => setFiles((current) => ({ ...current, institutionAffiliation: Array.from(e.target.files ?? []) }))} /></label>
           </div>}
-          <div className="registrationActions"><button type="button" className="btn outline" disabled={busy} onClick={() => void saveProfile(false)}>{busy ? "Savingâ€¦" : "Save draft"}</button><button type="button" className="btn" disabled={busy} onClick={() => void saveProfile(true)}>{busy ? "Savingâ€¦" : "Complete registration"}</button></div>
+          <div className="registrationActions"><button type="button" className="btn outline" disabled={busy} onClick={() => void saveProfile(false)}>{busy ? "Saving…" : "Save draft"}</button><button type="button" className="btn" disabled={busy} onClick={() => void saveProfile(true)}>{busy ? "Saving…" : "Complete registration"}</button></div>
         </>}
 
-        {stage === 5 && <div className="done"><div className="tick">âœ“</div><h1>Registration complete</h1><p className="sub">{kind === "candidate" ? "Your candidate profile is saved." : kind === "recruiter" ? "Your recruiter profile is saved. Corporate verification is pending where applicable." : "Your institution profile is saved and awaiting verification."}</p><Link className="btn block" href={dashboard[kind]}>Go to dashboard</Link></div>}
+        {stage === 5 && <div className="done"><div className="tick">✓</div><h1>Registration complete</h1><p className="sub">{kind === "candidate" ? "Your candidate profile is saved." : kind === "recruiter" ? "Your recruiter profile is saved. Corporate verification is pending where applicable." : "Your institution profile is saved and awaiting verification."}</p><Link className="btn block" href={dashboard[kind]}>Go to dashboard</Link></div>}
       </>}
     </section>
   </main></Page>;
 }
-

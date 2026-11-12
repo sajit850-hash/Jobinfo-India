@@ -1,5 +1,9 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+import path from "node:path";
 import { assertOtpProviderAllowed } from "./otp-policy";
+
+// Workspace scripts execute from apps/api, while the shared environment file lives at the repo root.
+dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
 const isProd = process.env.NODE_ENV === "production";
 const secret = process.env.JWT_SECRET ?? "";
