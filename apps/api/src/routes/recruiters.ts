@@ -8,6 +8,7 @@ import { consumePlanUsage, PlanAccessError } from "../billing/entitlements";
 import { getResumeStorage } from "../integrations/registry";
 import { getEmailProvider } from "../integrations/registry";
 import { createZip } from "../security/zip-archive";
+import { extractJobDescription } from "../ats/documents";
 
 export const recruitersRouter = Router();
 
@@ -259,13 +260,13 @@ recruitersRouter.get("/candidate-views", async (req, res) => {
 });
 
 recruitersRouter.get("/candidates/:candidateId", async (req, res) => {
-  const employer = await prisma.employer.findUnique({ where: { userId: userOf(req).id }, select: { id: true } });
+  const employer = await prisma.employer.findUnique({ where: { userId: userOf(req).id }, select: { id: true, companyId: true } });
   if (!employer) return res.status(404).json({ error: "Recruiter profile not found" });
   const candidate = await prisma.candidate.findFirst({ where: { id: String(req.params.candidateId), user: { is: { isActive: true, deletedAt: null } }, OR: [
     { searchable: true }, { applications: { some: { job: { employerId: employer.id } } } },
   ] }, select: {
-    id: true, headline: true, summary: true, city: true, state: true, experienceYears: true, currentDesignation: true, currentCompany: true, currentIndustry: true, currentSalary: true, expectedSalary: true, noticePeriod: true, workMode: true, employmentType: true, preferredShift: true, preferredJobRoles: true, preferredJobLocations: true, linkedinUrl: true, updatedAt: true, resumeUrl: true, profilePhotoKey: true,
-    user: { select: { id: true, fullName: true, emailVerifiedAt: true, phoneVerifiedAt: true } }, skills: { select: { name: true } }, education: true, certifications: true,
+    id: true, headline: true, summary: true, careerObjective: true, city: true, state: true, dateOfBirth: true, gender: true, highestQualification: true, course: true, grade: true, languages: true, experienceYears: true, currentDesignation: true, currentCompany: true, currentIndustry: true, currentSalary: true, expectedSalary: true, noticePeriod: true, workMode: true, employmentType: true, preferredShift: true, preferredJobRoles: true, preferredJobLocations: true, linkedinUrl: true, portfolioUrl: true, profileComplete: true, searchable: true, createdAt: true, updatedAt: true, resumeUrl: true, profilePhotoKey: true,
+    user: { select: { id: true, fullName: true, emailVerifiedAt: true, phoneVerifiedAt: true, createdAt: true, lastActiveAt: true } }, skills: { select: { name: true } }, education: true, certifications: true, trainings: true,
     workExperience: { orderBy: { startDate: "desc" } },
     recruiterActions: { where: { recruiterId: userOf(req).id }, select: { status: true } }, recruiterComments: { where: { recruiterId: userOf(req).id }, orderBy: { createdAt: "desc" }, take: 50 },
   } });
@@ -273,12 +274,20 @@ recruitersRouter.get("/candidates/:candidateId", async (req, res) => {
   try { await consumePlanUsage(userOf(req).id, "candidate.profile_views", 1, req.get("x-idempotency-key")); }
   catch (error) { if (error instanceof PlanAccessError) return res.status(error.status).json({ error: error.message, ...error.details }); throw error; }
   await prisma.$transaction(async tx => {
-    await tx.candidateProfileView.upsert({ where: { candidateId_recruiterId: { candidateId: candidate.id, recruiterId: userOf(req).id } }, create: { candidateId: candidate.id, recruiterId: userOf(req).id, source: "RECRUITER_PROFILE" }, update: { viewedAt: new Date(), source: "RECRUITER_PROFILE" } });
+    await tx.candidateProfileView.upsert({ where: { candidateId_recruiterId: { candidateId: candidate.id, recruiterId: userOf(req).id } }, create: { candidateId: candidate.id, recruiterId: userOf(req).id, companyId: employer.companyId, source: "RECRUITER_PROFILE" }, update: { viewedAt: new Date(), companyId: employer.companyId, source: "RECRUITER_PROFILE" } });
     await tx.candidateRecruiterAction.upsert({ where: { candidateId_recruiterId: { candidateId: candidate.id, recruiterId: userOf(req).id } }, create: { candidateId: candidate.id, recruiterId: userOf(req).id, status: "VIEWED" }, update: {} });
-    await tx.auditLog.create({ data: { actorId: userOf(req).id, action: "RECRUITER_CANDIDATE_PROFILE_VIEWED", entityType: "Candidate", entityId: candidate.id, ipAddress: req.ip } });
+    await tx.auditLog.create({ data: { actorId: userOf(req).id, action: "RECRUITER_CANDIDATE_PROFILE_VIEWED", entityType: "Candidate", entityId: candidate.id, metadata: { companyId: employer.companyId }, ipAddress: req.ip } });
   });
   const { resumeUrl, profilePhotoKey, ...safeCandidate } = candidate;
-  res.json({ candidate: { ...safeCandidate, hasResume: Boolean(resumeUrl), hasPhoto: Boolean(profilePhotoKey) } });
+  const profileFields = [Boolean(candidate.headline?.trim()), Boolean(candidate.summary?.trim()), Boolean(candidate.careerObjective?.trim()), Boolean(candidate.city), Boolean(candidate.state), candidate.experienceYears !== null, Boolean(candidate.currentDesignation), Boolean(candidate.currentCompany), Boolean(candidate.highestQualification), Boolean(candidate.course), candidate.skills.length > 0, candidate.education.length > 0, candidate.workExperience.length > 0, candidate.certifications.length > 0, candidate.trainings.length > 0, Boolean(resumeUrl), Boolean(profilePhotoKey), candidate.preferredJobRoles.length > 0, candidate.preferredJobLocations.length > 0, candidate.languages.length > 0];
+  const profileCompletionPercentage = Math.round(profileFields.filter(Boolean).length / profileFields.length * 100);
+  const recommendations = await prisma.candidateSearchRecommendation.findMany({ where: { recruiterId: userOf(req).id }, select: { id: true, criteria: true, results: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 30 });
+  const aiMatches = recommendations.flatMap(recommendation => {
+    if (!Array.isArray(recommendation.results)) return [];
+    const match = (recommendation.results as Array<Record<string, any>>).find(result => result.candidateId === candidate.id || result.id === candidate.id);
+    return match ? [{ recommendationId: recommendation.id, createdAt: recommendation.createdAt, criteria: recommendation.criteria, match }] : [];
+  });
+  res.json({ candidate: { ...safeCandidate, dateOfBirth: process.env.ENABLE_AGE_BASED_CANDIDATE_FILTERS === "true" ? safeCandidate.dateOfBirth : null, gender: process.env.ENABLE_AGE_BASED_CANDIDATE_FILTERS === "true" ? safeCandidate.gender : null, profileCompletionPercentage, recruiterStatus: candidate.recruiterActions[0]?.status || "VIEWED", hasResume: Boolean(resumeUrl), hasPhoto: Boolean(profilePhotoKey), aiMatches } });
 });
 
 recruitersRouter.get("/candidates/:candidateId/resume", async (req, res) => {
@@ -291,12 +300,61 @@ recruitersRouter.get("/candidates/:candidateId/resume", async (req, res) => {
   try {
     const file = await getResumeStorage().read(candidate.resumeUrl);
     res.setHeader("Content-Type", file.contentType); res.setHeader("Content-Length", file.bytes.length); res.setHeader("Content-Disposition", `attachment; filename="${file.fileName.replace(/[\\\r\n\"]/g, "_")}"`); res.setHeader("Cache-Control", "private, no-store"); res.setHeader("X-Content-Type-Options", "nosniff"); res.send(file.bytes);
+    await prisma.auditLog.create({ data: { actorId: userOf(req).id, action: "RECRUITER_CANDIDATE_RESUME_DOWNLOADED", entityType: "Candidate", entityId: candidate.id, ipAddress: req.ip } });
   } catch { res.status(404).json({ error: "Candidate resume is unavailable" }); }
+});
+
+recruitersRouter.get("/candidates/:candidateId/resume/preview", async (req, res) => {
+  const employer = await prisma.employer.findUnique({ where: { userId: userOf(req).id }, select: { id: true } });
+  const candidate = employer && await prisma.candidate.findFirst({ where: { id: String(req.params.candidateId), user: { is: { isActive: true, deletedAt: null } }, OR: [{ searchable: true }, { applications: { some: { job: { employerId: employer.id } } } }] }, select: { id: true, resumeUrl: true } });
+  if (!candidate?.resumeUrl) return res.status(404).json({ error: "Candidate resume is unavailable" });
+  try {
+    const file = await getResumeStorage().read(candidate.resumeUrl);
+    const extension = file.fileName.toLowerCase().split(".").pop();
+    res.setHeader("Cache-Control", "private, no-store"); res.setHeader("X-Content-Type-Options", "nosniff");
+    await prisma.auditLog.create({ data: { actorId: userOf(req).id, action: "RECRUITER_CANDIDATE_RESUME_VIEWED", entityType: "Candidate", entityId: candidate.id, metadata: { format: extension }, ipAddress: req.ip } });
+    if (extension === "pdf" && file.bytes.subarray(0, 5).toString() === "%PDF-") {
+      const range = req.get("range"); const match = range?.match(/^bytes=(\d*)-(\d*)$/);
+      res.setHeader("Content-Type", "application/pdf"); res.setHeader("Content-Disposition", `inline; filename="${file.fileName.replace(/[\\\r\n\"]/g, "_")}"`); res.setHeader("Accept-Ranges", "bytes");
+      if (match) {
+        const suffixLength = !match[1] && match[2] ? Number(match[2]) : 0;
+        const start = match[1] ? Number(match[1]) : suffixLength ? Math.max(0, file.bytes.length - suffixLength) : 0;
+        const end = Math.min(match[2] && match[1] ? Number(match[2]) : file.bytes.length - 1, file.bytes.length - 1);
+        if (start > end || start >= file.bytes.length) { res.setHeader("Content-Range", `bytes */${file.bytes.length}`); return res.status(416).end(); }
+        res.status(206).setHeader("Content-Range", `bytes ${start}-${end}/${file.bytes.length}`); res.setHeader("Content-Length", end - start + 1); return res.send(file.bytes.subarray(start, end + 1));
+      }
+      res.setHeader("Content-Length", file.bytes.length); return res.send(file.bytes);
+    }
+    if (extension === "doc" || extension === "docx") {
+      const text = await extractJobDescription(file.bytes, file.fileName);
+      return res.json({ kind: "text", fileName: file.fileName, text });
+    }
+    return res.status(415).json({ error: "This resume format cannot be previewed" });
+  } catch (error) { if (!res.headersSent) res.status(415).json({ error: error instanceof Error ? "Resume preview is unavailable or could not be read" : "Resume preview is unavailable" }); }
+});
+
+recruitersRouter.get("/candidates/:candidateId/activity", async (req, res) => {
+  const employer = await prisma.employer.findUnique({ where: { userId: userOf(req).id }, select: { id: true } });
+  const candidate = employer && await prisma.candidate.findFirst({ where: { id: String(req.params.candidateId), user: { is: { isActive: true, deletedAt: null } }, OR: [{ searchable: true }, { applications: { some: { job: { employerId: employer.id } } } }] }, select: { id: true } });
+  if (!candidate) return res.status(404).json({ error: "Candidate profile not found or private" });
+  const [logs, comments, status, view] = await Promise.all([
+    prisma.auditLog.findMany({ where: { actorId: userOf(req).id, entityType: "Candidate", entityId: candidate.id }, orderBy: { createdAt: "desc" }, take: 50, select: { id: true, action: true, metadata: true, createdAt: true } }),
+    prisma.candidateRecruiterComment.findMany({ where: { candidateId: candidate.id, recruiterId: userOf(req).id }, orderBy: { createdAt: "desc" }, take: 50, select: { id: true, body: true, createdAt: true } }),
+    prisma.candidateRecruiterAction.findUnique({ where: { candidateId_recruiterId: { candidateId: candidate.id, recruiterId: userOf(req).id } }, select: { status: true, createdAt: true, updatedAt: true } }),
+    prisma.candidateProfileView.findUnique({ where: { candidateId_recruiterId: { candidateId: candidate.id, recruiterId: userOf(req).id } }, select: { viewedAt: true, source: true, companyId: true } }),
+  ]);
+  const activities = [
+    ...logs.map(log => ({ id: log.id, type: log.action, details: log.metadata, createdAt: log.createdAt })),
+    ...comments.map(comment => ({ id: comment.id, type: "COMMENT_ADDED", details: { body: comment.body }, createdAt: comment.createdAt })),
+    ...(view ? [{ id: `view-${candidate.id}`, type: "PROFILE_VIEWED", details: { source: view.source, companyId: view.companyId }, createdAt: view.viewedAt }] : []),
+    ...(status ? [{ id: `status-${candidate.id}`, type: `STATUS_${status.status}`, details: null, createdAt: status.updatedAt }] : []),
+  ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 100);
+  res.json({ data: activities });
 });
 
 recruitersRouter.get("/candidates/:candidateId/photo", async (req, res) => {
   const employer = await prisma.employer.findUnique({ where: { userId: userOf(req).id }, select: { id: true } });
-  const candidate = employer && await prisma.candidate.findFirst({ where: { id: String(req.params.candidateId), searchable: true, user: { is: { isActive: true, deletedAt: null } } }, select: { profilePhotoKey: true } });
+  const candidate = employer && await prisma.candidate.findFirst({ where: { id: String(req.params.candidateId), user: { is: { isActive: true, deletedAt: null } }, OR: [{ searchable: true }, { applications: { some: { job: { employerId: employer.id } } } }] }, select: { profilePhotoKey: true } });
   if (!candidate?.profilePhotoKey) return res.status(404).json({ error: "Candidate photo is unavailable" });
   try { const file = await getResumeStorage().read(candidate.profilePhotoKey); if (!file.contentType.startsWith("image/")) return res.status(415).json({ error: "Stored photo has an unsupported format" }); res.setHeader("Content-Type", file.contentType); res.setHeader("Content-Length", file.bytes.length); res.setHeader("Content-Disposition", "inline"); res.setHeader("Cache-Control", "private, no-store"); res.setHeader("X-Content-Type-Options", "nosniff"); res.send(file.bytes); await prisma.auditLog.create({ data: { actorId: userOf(req).id, action: "RECRUITER_CANDIDATE_PHOTO_VIEWED", entityType: "Candidate", entityId: String(req.params.candidateId), ipAddress: req.ip } }); }
   catch { res.status(404).json({ error: "Candidate photo is unavailable" }); }
@@ -304,10 +362,29 @@ recruitersRouter.get("/candidates/:candidateId/photo", async (req, res) => {
 
 recruitersRouter.get("/candidates/:candidateId/contact", async (req, res) => {
   const employer = await prisma.employer.findUnique({ where: { userId: userOf(req).id }, select: { id: true } });
-  const candidate = employer && await prisma.candidate.findFirst({ where: { id: String(req.params.candidateId), searchable: true, user: { is: { isActive: true, deletedAt: null } } }, select: { id: true, user: { select: { email: true, phone: true, emailVerifiedAt: true, phoneVerifiedAt: true } } } });
+  const candidate = employer && await prisma.candidate.findFirst({ where: { id: String(req.params.candidateId), user: { is: { isActive: true, deletedAt: null } }, OR: [{ searchable: true }, { applications: { some: { job: { employerId: employer.id } } } }] }, select: { id: true, user: { select: { email: true, phone: true, emailVerifiedAt: true, phoneVerifiedAt: true } } } });
   if (!candidate) return res.status(404).json({ error: "Candidate has not shared contact details with recruiters" });
-  await prisma.auditLog.create({ data: { actorId: userOf(req).id, action: "RECRUITER_CANDIDATE_CONTACT_VIEWED", entityType: "Candidate", entityId: candidate.id, ipAddress: req.ip } });
+  await prisma.$transaction([
+    prisma.candidateRecruiterAction.upsert({ where: { candidateId_recruiterId: { candidateId: candidate.id, recruiterId: userOf(req).id } }, create: { candidateId: candidate.id, recruiterId: userOf(req).id, status: "CONTACTED" }, update: { status: "CONTACTED" } }),
+    prisma.auditLog.create({ data: { actorId: userOf(req).id, action: "RECRUITER_CANDIDATE_CONTACT_VIEWED", entityType: "Candidate", entityId: candidate.id, ipAddress: req.ip } }),
+  ]);
   res.json({ email: candidate.user.emailVerifiedAt ? candidate.user.email : null, phone: candidate.user.phoneVerifiedAt ? candidate.user.phone : null });
+});
+
+recruitersRouter.post("/candidates/:candidateId/email", async (req, res) => {
+  const payload = z.object({ subject: z.string().trim().min(2).max(150), body: z.string().trim().min(1).max(10000) }).safeParse(req.body);
+  if (!payload.success) return res.status(400).json({ error: "Enter an email subject and message" });
+  const employer = await prisma.employer.findUnique({ where: { userId: userOf(req).id }, select: { id: true } });
+  const candidate = employer && await prisma.candidate.findFirst({ where: { id: String(req.params.candidateId), user: { is: { isActive: true, deletedAt: null, emailVerifiedAt: { not: null } } }, OR: [{ searchable: true }, { applications: { some: { job: { employerId: employer.id } } } }] }, select: { id: true, user: { select: { email: true } } } });
+  if (!candidate) return res.status(404).json({ error: "Candidate email is unavailable or the profile is not shared with your company" });
+  const recruiter = await prisma.user.findUnique({ where: { id: userOf(req).id }, select: { email: true } });
+  try { await getEmailProvider().send({ to: recruiter!.email, bcc: [candidate.user.email], subject: payload.data.subject, text: payload.data.body }); }
+  catch { return res.status(503).json({ error: "Email integration is unavailable. Configure the actual email provider before sending." }); }
+  await prisma.$transaction([
+    prisma.candidateRecruiterAction.upsert({ where: { candidateId_recruiterId: { candidateId: candidate.id, recruiterId: userOf(req).id } }, create: { candidateId: candidate.id, recruiterId: userOf(req).id, status: "CONTACTED" }, update: { status: "CONTACTED" } }),
+    prisma.auditLog.create({ data: { actorId: userOf(req).id, action: "RECRUITER_CANDIDATE_EMAIL_SENT", entityType: "Candidate", entityId: candidate.id, metadata: { channel: "EMAIL" }, ipAddress: req.ip } }),
+  ]);
+  res.json({ sent: true });
 });
 
 recruitersRouter.patch("/candidates/:candidateId/status", async (req, res) => {

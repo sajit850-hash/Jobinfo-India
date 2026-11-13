@@ -160,6 +160,7 @@ model Candidate {
   userId          String   @unique
   headline        String?
   summary         String?
+  careerObjective String?
   city            String?
   state           String?
   resumeUrl       String?
@@ -198,6 +199,7 @@ model Candidate {
   skills       CandidateSkill[]
   education    Education[]
   certifications Certification[]
+  trainings CandidateTraining[]
   workExperience WorkExperience[]
   savedJobs    SavedJob[]
   profileViews CandidateProfileView[]
@@ -221,6 +223,7 @@ model Education {
   id          String  @id @default(cuid())
   candidateId String
   institution String
+  university  String?
   degree      String
   field       String?
   department  String?
@@ -228,6 +231,18 @@ model Education {
   grade       String?
 
   candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+}
+
+model CandidateTraining {
+  id          String   @id @default(cuid())
+  candidateId String
+  name        String
+  provider    String?
+  details     String?
+  completionYear Int?
+  createdAt   DateTime @default(now())
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  @@index([candidateId, completionYear])
 }
 
 model Employer {
@@ -288,6 +303,7 @@ model Company {
   verified Boolean @default(false)
   createdAt DateTime @default(now())
   recruiters Employer[]
+  candidateProfileViews CandidateProfileView[]
 }
 
 model Job {
@@ -629,10 +645,13 @@ model CandidateProfileView {
   recruiterId String
   viewedAt DateTime @default(now())
   source String?
+  companyId String?
   candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
   recruiter User @relation("RecruiterCandidateViews", fields: [recruiterId], references: [id], onDelete: Cascade)
+  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
   @@index([candidateId, viewedAt])
   @@index([recruiterId, viewedAt])
+  @@index([companyId, viewedAt])
   @@unique([candidateId, recruiterId])
 }
 

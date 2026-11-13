@@ -5,12 +5,14 @@ import Link from "next/link";
 import { Page } from "@/components/SiteChrome";
 import { API, api } from "@/lib/api";
 
-type Education = { institution: string; degree: string; field: string; department: string; passingYear: string };
+type Education = { institution: string; university: string; degree: string; field: string; department: string; passingYear: string; grade: string };
 type Certification = { name: string; issuer: string; issueYear: string; credentialUrl: string };
 type Experience = { company: string; title: string; location: string; description: string; startDate: string; endDate: string; current: boolean };
-const emptyEducation: Education = { institution: "", degree: "", field: "", department: "", passingYear: "" };
+type Training = { name: string; provider: string; details: string; completionYear: string };
+const emptyEducation: Education = { institution: "", university: "", degree: "", field: "", department: "", passingYear: "", grade: "" };
 const emptyCertification: Certification = { name: "", issuer: "", issueYear: "", credentialUrl: "" };
 const emptyExperience: Experience = { company: "", title: "", location: "", description: "", startDate: "", endDate: "", current: false };
+const emptyTraining: Training = { name: "", provider: "", details: "", completionYear: "" };
 
 function base64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -26,6 +28,7 @@ export default function CandidateProfile() {
   const [fullName, setFullName] = useState("");
   const [headline, setHeadline] = useState("");
   const [summary, setSummary] = useState("");
+  const [careerObjective, setCareerObjective] = useState(""); const [dateOfBirth, setDateOfBirth] = useState("");
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
   const [experienceYears, setExperienceYears] = useState("");
@@ -33,6 +36,7 @@ export default function CandidateProfile() {
   const [skills, setSkills] = useState("");
   const [education, setEducation] = useState<Education[]>([{ ...emptyEducation }]);
   const [certifications, setCertifications] = useState<Certification[]>([]);
+  const [trainings, setTrainings] = useState<Training[]>([]);
   const [experience, setExperience] = useState<Experience[]>([]);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -43,12 +47,13 @@ export default function CandidateProfile() {
     api<{ candidate: any }>("/api/v1/candidates/me").then((r) => {
       if (!r.ok) { setError(r.data.error || "Please sign in as a candidate."); return; }
       const c = r.data.candidate;
-      setProfile(c); setFullName(c.user?.fullName || ""); setHeadline(c.headline || ""); setSummary(c.summary || ""); setCity(c.city || ""); setState(c.state || "");
+      setProfile(c); setFullName(c.user?.fullName || ""); setHeadline(c.headline || ""); setSummary(c.summary || ""); setCareerObjective(c.careerObjective || ""); setDateOfBirth(c.dateOfBirth?.slice(0,10) || ""); setCity(c.city || ""); setState(c.state || "");
       setExperienceYears(c.experienceYears == null ? "" : String(c.experienceYears));
       setGender(c.gender||""); setHighestQualification(c.highestQualification||""); setCourse(c.course||""); setCurrentDesignation(c.currentDesignation||""); setCurrentCompany(c.currentCompany||""); setCurrentIndustry(c.currentIndustry||""); setCurrentSalary(c.currentSalary==null?"":String(c.currentSalary)); setExpectedSalary(c.expectedSalary==null?"":String(c.expectedSalary)); setPreferredJobLocations((c.preferredJobLocations||[]).join(", ")); setPreferredJobRoles((c.preferredJobRoles||[]).join(", ")); setWorkMode(c.workMode||""); setEmploymentType(c.employmentType||""); setNoticePeriod(c.noticePeriod||""); setPreferredShift(c.preferredShift||""); setLanguages((c.languages||[]).join(", ")); setLinkedinUrl(c.linkedinUrl||"");
       setSkills((c.skills || []).map((x: any) => x.name).join(", "));
-      setEducation(c.education?.length ? c.education.map((x: any) => ({ institution: x.institution, degree: x.degree, field: x.field || "", department: x.department || "", passingYear: x.passingYear ? String(x.passingYear) : "" })) : [{ ...emptyEducation }]);
+      setEducation(c.education?.length ? c.education.map((x: any) => ({ institution: x.institution, university: x.university || "", degree: x.degree, field: x.field || "", department: x.department || "", passingYear: x.passingYear ? String(x.passingYear) : "", grade: x.grade || "" })) : [{ ...emptyEducation }]);
       setCertifications((c.certifications || []).map((x: any) => ({ name: x.name, issuer: x.issuer || "", issueYear: x.issueYear ? String(x.issueYear) : "", credentialUrl: x.credentialUrl || "" })));
+      setTrainings((c.trainings || []).map((x: any) => ({ name: x.name, provider: x.provider || "", details: x.details || "", completionYear: x.completionYear ? String(x.completionYear) : "" })));
       setExperience((c.workExperience || []).map((x: any) => ({ company: x.company, title: x.title, location: x.location || "", description: x.description || "", startDate: x.startDate.slice(0, 10), endDate: x.endDate?.slice(0, 10) || "", current: x.current })));
     });
   }, []);
@@ -67,10 +72,11 @@ export default function CandidateProfile() {
   const save = async (event: React.FormEvent) => {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
     const r = await api("/api/v1/candidates/me", { method: "PUT", body: JSON.stringify({
-      fullName, headline, summary, city, state, searchable: profile.searchable, gender, highestQualification, course, currentDesignation, currentCompany, currentIndustry, currentSalary: currentSalary === "" ? undefined : Number(currentSalary), expectedSalary: expectedSalary === "" ? undefined : Number(expectedSalary), preferredJobLocations: preferredJobLocations.split(",").map(x=>x.trim()).filter(Boolean), preferredJobRoles: preferredJobRoles.split(",").map(x=>x.trim()).filter(Boolean), workMode, employmentType, noticePeriod, preferredShift, languages: languages.split(",").map(x=>x.trim()).filter(Boolean), linkedinUrl, experienceYears: experienceYears === "" ? undefined : Number(experienceYears),
+      fullName, headline, summary, careerObjective, dateOfBirth: dateOfBirth || undefined, city, state, searchable: profile.searchable, gender, highestQualification, course, currentDesignation, currentCompany, currentIndustry, currentSalary: currentSalary === "" ? undefined : Number(currentSalary), expectedSalary: expectedSalary === "" ? undefined : Number(expectedSalary), preferredJobLocations: preferredJobLocations.split(",").map(x=>x.trim()).filter(Boolean), preferredJobRoles: preferredJobRoles.split(",").map(x=>x.trim()).filter(Boolean), workMode, employmentType, noticePeriod, preferredShift, languages: languages.split(",").map(x=>x.trim()).filter(Boolean), linkedinUrl, experienceYears: experienceYears === "" ? undefined : Number(experienceYears),
       skills: skills.split(",").map((x) => x.trim()).filter(Boolean),
-      education: education.filter((x) => x.institution.trim() && x.degree.trim()).map((x) => ({ ...x, passingYear: x.passingYear ? Number(x.passingYear) : undefined, field: x.field || undefined, department: x.department || undefined })),
+      education: education.filter((x) => x.institution.trim() && x.degree.trim()).map((x) => ({ ...x, passingYear: x.passingYear ? Number(x.passingYear) : undefined, field: x.field || undefined, department: x.department || undefined, university: x.university || undefined, grade: x.grade || undefined })),
       certifications: certifications.filter((x) => x.name.trim()).map((x) => ({ ...x, issueYear: x.issueYear ? Number(x.issueYear) : undefined, issuer: x.issuer || undefined, credentialUrl: x.credentialUrl || undefined })),
+      trainings: trainings.filter((x) => x.name.trim()).map((x) => ({ ...x, completionYear: x.completionYear ? Number(x.completionYear) : undefined, provider: x.provider || undefined, details: x.details || undefined })),
       workExperience: experience.filter((x) => x.company.trim() && x.title.trim() && x.startDate).map((x) => ({ ...x, location: x.location || undefined, description: x.description || undefined, endDate: x.current ? undefined : x.endDate || undefined })),
     }) });
     setBusy(false);
@@ -122,6 +128,8 @@ export default function CandidateProfile() {
           <div className="row2"><label className="field">Email address<input value={profile.user?.email || ""} readOnly /></label><label className="field">Mobile number<input value={profile.user?.phone || ""} readOnly /></label></div>
           <label className="field">Professional headline<input value={headline} maxLength={120} onChange={(e) => setHeadline(e.target.value)} placeholder="e.g. Frontend engineer specializing in React" /></label>
           <label className="field">About you<textarea value={summary} maxLength={2000} rows={4} onChange={(e) => setSummary(e.target.value)} /></label>
+          <label className="field">Career objective<textarea value={careerObjective} maxLength={2000} rows={3} onChange={e=>setCareerObjective(e.target.value)} placeholder="Describe the kind of work and growth you are seeking." /></label>
+          <label className="field">Date of birth<input type="date" value={dateOfBirth} onChange={e=>setDateOfBirth(e.target.value)} /></label>
           <div className="row2"><label className="field">City<input value={city} onChange={(e) => setCity(e.target.value)} /></label><label className="field">State<input value={state} onChange={(e) => setState(e.target.value)} /></label></div>
           <label className="field">Years of experience (0 = fresher)<input type="number" min={0} max={50} value={experienceYears} onChange={(e) => setExperienceYears(e.target.value)} /></label>
           <label className="field">Skills, separated by commas<input value={skills} onChange={(e) => setSkills(e.target.value)} placeholder="React, TypeScript, SQL" /></label>
@@ -137,10 +145,14 @@ export default function CandidateProfile() {
         </section>
         <section className="card"><div className="sectionTitle"><h2>Education</h2><button className="btn outline sm" type="button" onClick={() => setEducation([...education, { ...emptyEducation }])}>Add education</button></div>
           {education.map((x, i) => <div className="repeatBlock" key={i}><button type="button" className="removeRow" onClick={() => setEducation(education.filter((_, n) => n !== i))} aria-label="Remove education">Remove</button>
-            <div className="row2"><label className="field">Institution<input value={x.institution} onChange={(e) => updateRow(education, setEducation, i, { institution: e.target.value })} /></label><label className="field">Degree<input value={x.degree} onChange={(e) => updateRow(education, setEducation, i, { degree: e.target.value })} /></label></div>
-            <div className="row2"><label className="field">Field of study<input value={x.field} onChange={(e) => updateRow(education, setEducation, i, { field: e.target.value })} /></label><label className="field">Passing year<input type="number" min={1970} max={2100} value={x.passingYear} onChange={(e) => updateRow(education, setEducation, i, { passingYear: e.target.value })} /></label></div>
+            <div className="row2"><label className="field">Institution<input value={x.institution} onChange={(e) => updateRow(education, setEducation, i, { institution: e.target.value })} /></label><label className="field">University<input value={x.university} onChange={e=>updateRow(education,setEducation,i,{university:e.target.value})} /></label></div>
+            <div className="row2"><label className="field">Qualification / degree<input value={x.degree} onChange={(e) => updateRow(education, setEducation, i, { degree: e.target.value })} /></label><label className="field">Course / specialization<input value={x.field} onChange={(e) => updateRow(education, setEducation, i, { field: e.target.value })} /></label></div>
+            <div className="row2"><label className="field">Passing year<input type="number" min={1970} max={2100} value={x.passingYear} onChange={(e) => updateRow(education, setEducation, i, { passingYear: e.target.value })} /></label><label className="field">Percentage / CGPA<input value={x.grade} onChange={e=>updateRow(education,setEducation,i,{grade:e.target.value})} /></label></div>
             <label className="field">Department<input value={x.department} onChange={(e) => updateRow(education, setEducation, i, { department: e.target.value })} placeholder="e.g. Computer Science" /></label>
           </div>)}
+        </section>
+        <section className="card"><div className="sectionTitle"><h2>Training</h2><button className="btn outline sm" type="button" onClick={()=>setTrainings([...trainings,{...emptyTraining}])}>Add training</button></div>
+          {trainings.map((x,i)=><div className="repeatBlock" key={i}><button type="button" className="removeRow" onClick={()=>setTrainings(trainings.filter((_,n)=>n!==i))}>Remove</button><div className="row2"><label className="field">Training / course<input value={x.name} onChange={e=>updateRow(trainings,setTrainings,i,{name:e.target.value})}/></label><label className="field">Provider<input value={x.provider} onChange={e=>updateRow(trainings,setTrainings,i,{provider:e.target.value})}/></label></div><div className="row2"><label className="field">Completion year<input type="number" min={1970} max={2100} value={x.completionYear} onChange={e=>updateRow(trainings,setTrainings,i,{completionYear:e.target.value})}/></label><label className="field">Details<input value={x.details} onChange={e=>updateRow(trainings,setTrainings,i,{details:e.target.value})}/></label></div></div>)}
         </section>
         <section className="card"><div className="sectionTitle"><h2>Certifications</h2><button className="btn outline sm" type="button" onClick={() => setCertifications([...certifications, { ...emptyCertification }])}>Add certification</button></div>
           {certifications.map((x, i) => <div className="repeatBlock" key={i}><button type="button" className="removeRow" onClick={() => setCertifications(certifications.filter((_, n) => n !== i))}>Remove</button>

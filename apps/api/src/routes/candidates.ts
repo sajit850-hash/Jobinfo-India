@@ -11,6 +11,7 @@ const profileSchema = z.object({
   fullName: z.string().trim().min(2).max(100).optional(),
   headline: z.string().trim().max(120).optional(),
   summary: z.string().trim().max(2000).optional(),
+  careerObjective: z.string().trim().max(2000).optional(),
   city: z.string().trim().max(80).optional(),
   state: z.string().trim().max(80).optional(),
   currentAddress: z.string().trim().max(500).optional(),
@@ -39,6 +40,7 @@ const profileSchema = z.object({
   skills: z.array(z.string().trim().min(1).max(40)).max(30).default([]),
   education: z.array(z.object({
     institution: z.string().trim().min(1).max(150),
+    university: z.string().trim().max(150).optional(),
     degree: z.string().trim().min(1).max(100),
     field: z.string().trim().max(100).optional(),
     department: z.string().trim().max(100).optional(),
@@ -52,6 +54,12 @@ const profileSchema = z.object({
     issueDate: z.string().date().optional(),
     expiryDate: z.string().date().optional(),
     credentialUrl: z.string().url().optional().or(z.literal("")),
+  })).max(20).default([]),
+  trainings: z.array(z.object({
+    name: z.string().trim().min(1).max(150),
+    provider: z.string().trim().max(150).optional(),
+    details: z.string().trim().max(1000).optional(),
+    completionYear: z.number().int().min(1970).max(2100).optional(),
   })).max(20).default([]),
   workExperience: z.array(z.object({
     company: z.string().trim().min(1).max(150),
@@ -67,7 +75,7 @@ const profileSchema = z.object({
 
 
 candidatesRouter.get("/me", async (req, res) => {
-  const candidate = await prisma.candidate.findUnique({ where: { userId: userOf(req).id }, include: { user: { select: { fullName: true, email: true, phone: true, emailVerifiedAt: true, phoneVerifiedAt: true, registrationStatus: true } }, skills: true, education: true, certifications: true, workExperience: { orderBy: { startDate: "desc" } } } });
+  const candidate = await prisma.candidate.findUnique({ where: { userId: userOf(req).id }, include: { user: { select: { fullName: true, email: true, phone: true, emailVerifiedAt: true, phoneVerifiedAt: true, registrationStatus: true } }, skills: true, education: true, certifications: true, trainings: true, workExperience: { orderBy: { startDate: "desc" } } } });
   if (!candidate) return res.status(404).json({ error: "Candidate profile not found" });
   const { resumeUrl, profilePhotoKey, ...profile } = candidate;
   res.json({ candidate: { ...profile, hasResume: !!resumeUrl, hasProfilePhoto: !!profilePhotoKey } });
@@ -76,7 +84,7 @@ candidatesRouter.get("/me", async (req, res) => {
 candidatesRouter.put("/me", async (req, res) => {
   const p = profileSchema.safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: p.error.issues[0].message });
-  const { fullName, skills, education, certifications, workExperience, complete: requestedComplete, dateOfBirth, ...rest } = p.data;
+  const { fullName, skills, education, certifications, trainings, workExperience, complete: requestedComplete, dateOfBirth, ...rest } = p.data;
   const complete = requestedComplete ?? true;
   const cand = await prisma.candidate.findUniqueOrThrow({ where: { userId: userOf(req).id } });
   if (complete && (!rest.headline?.trim() || !rest.city?.trim() || (!skills.length && !education.length && !workExperience.length))) {
@@ -110,6 +118,8 @@ candidatesRouter.put("/me", async (req, res) => {
       credentialUrl: c.credentialUrl || null,
       candidateId: cand.id,
     })) })] : []),
+    prisma.candidateTraining.deleteMany({ where: { candidateId: cand.id } }),
+    ...(trainings.length ? [prisma.candidateTraining.createMany({ data: trainings.map((training) => ({ ...training, candidateId: cand.id })) })] : []),
     prisma.workExperience.deleteMany({ where: { candidateId: cand.id } }),
     ...(workExperience.length ? [prisma.workExperience.createMany({ data: workExperience.map((x) => ({ ...x, startDate: new Date(`${x.startDate}T00:00:00.000Z`), endDate: x.endDate ? new Date(`${x.endDate}T00:00:00.000Z`) : null, candidateId: cand.id })) })] : []),
     prisma.user.update({
