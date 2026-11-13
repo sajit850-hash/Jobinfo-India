@@ -28,7 +28,8 @@ applicationsRouter.get("/mine", requireAuth("CANDIDATE"), async (req, res) => {
 applicationsRouter.get("/recruiter", requireAuth("RECRUITER"), async (req, res) => {
   const employer = await prisma.employer.findUnique({ where: { userId: userOf(req).id } });
   if (!employer) return res.status(404).json({ error: "Recruiter profile not found" });
-  const data = await prisma.application.findMany({ where: { job: { employerId: employer.id } }, include: { job: true, candidate: { include: { user: { select: { fullName: true, email: true } }, skills: true, education: true, workExperience: true } }, statusHistory: { orderBy: { changedAt: "desc" } }, interviews: { orderBy: { scheduledAt: "asc" } } }, orderBy: { appliedAt: "desc" } });
+  const jobId = typeof req.query.jobId === "string" ? req.query.jobId.slice(0, 100) : "";
+  const data = await prisma.application.findMany({ where: { job: { employerId: employer.id }, ...(jobId ? { jobId } : {}) }, include: { job: true, candidate: { include: { user: { select: { fullName: true, email: true } }, skills: true, education: true, workExperience: true } }, statusHistory: { orderBy: { changedAt: "desc" } }, interviews: { orderBy: { scheduledAt: "asc" } } }, orderBy: { appliedAt: "desc" } });
   res.json({ data });
 });
 applicationsRouter.post("/:id/interviews", requireAuth("RECRUITER"), async (req, res) => {

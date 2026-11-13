@@ -7,12 +7,13 @@ import { api } from "@/lib/api";
 const actions = ["VIEWED", "SHORTLISTED", "INTERVIEW", "OFFERED", "HIRED", "REJECTED"];
 export default function RecruiterApplications() {
   const [rows, setRows] = useState<any[]>([]); const [error, setError] = useState(""); const [busy, setBusy] = useState(""); const [filter, setFilter] = useState("ALL");
-  const refresh = () => api<{data:any[]}>("/api/v1/applications/recruiter").then((r) => r.ok ? setRows(r.data.data) : setError(r.data.error || "Sign in as a recruiter to view applicants."));
-  useEffect(() => { void refresh(); }, []);
+  const [jobId, setJobId] = useState("");
+  const refresh = (selectedJobId = jobId) => api<{data:any[]}>(`/api/v1/applications/recruiter${selectedJobId ? `?jobId=${encodeURIComponent(selectedJobId)}` : ""}`).then((r) => r.ok ? setRows(r.data.data) : setError(r.data.error || "Sign in as a recruiter to view applicants."));
+  useEffect(() => { const params = new URLSearchParams(window.location.search); const selectedJobId = params.get("jobId") || ""; const requestedStatus = params.get("status") || ""; setJobId(selectedJobId); if (actions.includes(requestedStatus)) setFilter(requestedStatus); void refresh(selectedJobId); }, []);
   const update = async (id: string, status: string) => { setBusy(id); setError(""); const r = await api(`/api/v1/applications/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }); setBusy(""); if (!r.ok) setError(r.data.error || "Could not update application"); else void refresh(); };
   const schedule = async (id: string) => { const value = window.prompt("Interview date and time (local time, YYYY-MM-DDTHH:mm)", new Date(Date.now() + 86400000).toISOString().slice(0, 16)); if (!value) return; const when = new Date(value); if (Number.isNaN(when.valueOf())) { setError("Enter a valid interview date and time"); return; } setBusy(id); const r = await api(`/api/v1/applications/${id}/interviews`, { method: "POST", body: JSON.stringify({ scheduledAt: when.toISOString(), mode: "VIDEO", notes: "Scheduled from recruiter applications." }) }); setBusy(""); if (!r.ok) setError(r.data.error || "Could not schedule interview"); else void refresh(); };
   const filtered = filter === "ALL" ? rows : rows.filter((x) => x.status === filter);
-  return <Page><main className="wrap section"><p className="eyebrow">RECRUITER WORKSPACE</p><h1>Applications</h1>
+  return <Page><main className="wrap section"><p className="eyebrow">RECRUITER WORKSPACE</p><h1>Applications</h1>{(jobId||filter!=="ALL")&&<p className="muted">Showing {filter!=="ALL"?filter.toLowerCase()+" applications":"applications for the selected job"}. <Link className="textLink" href="/recruiter/applications">Show all applications</Link></p>}
     {error && <div className="err">{error} <Link href="/login">Sign in</Link></div>}
     <label className="field applicationFilter">Filter by status<select value={filter} onChange={(e) => setFilter(e.target.value)}><option value="ALL">All statuses</option>{actions.map((x) => <option key={x}>{x}</option>)}</select></label>
     <div className="applicationList">{filtered.map((item) => <article className="card recruiterApplication" key={item.id}>

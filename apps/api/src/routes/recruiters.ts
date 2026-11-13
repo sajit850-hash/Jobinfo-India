@@ -43,17 +43,23 @@ recruitersRouter.get("/me", async (req, res) => {
   const userId = userOf(req).id;
   const employer = await prisma.employer.findUnique({ where: { userId }, include: { user: { select: { fullName: true, email: true, phone: true, emailVerifiedAt: true, phoneVerifiedAt: true, registrationStatus: true } }, jobs: { orderBy: { createdAt: "desc" }, take: 20, include: { _count: { select: { applications: true } } } } } });
   if (!employer) return res.status(404).json({ error: "Recruiter profile not found" });
-  const [totalJobs, publishedJobs, draftJobs, pendingApprovalJobs, applications, pendingApplications, shortlistedCandidates, upcomingInterviews] = await Promise.all([
+  const [totalJobs, publishedJobs, draftJobs, pendingApprovalJobs, applications, pendingApplications, shortlistedCandidates, upcomingInterviews, applicationGroups] = await Promise.all([
     prisma.job.count({ where: { employerId: employer.id } }),
-    prisma.job.count({ where: { employerId: employer.id, status: "PUBLISHED" } }),
+    prisma.job.count({ where: { employerId: employer.id, status: { in: ["PUBLISHED", "ACTIVE"] } } }),
     prisma.job.count({ where: { employerId: employer.id, status: "DRAFT" } }),
     prisma.job.count({ where: { employerId: employer.id, status: { in: ["PENDING_APPROVAL","PENDING_REVIEW"] } } }),
     prisma.application.count({ where: { job: { employerId: employer.id } } }),
     prisma.application.count({ where: { job: { employerId: employer.id }, status: "APPLIED" } }),
     prisma.application.count({ where: { job: { employerId: employer.id }, status: "SHORTLISTED" } }),
     prisma.interview.count({ where: { recruiterId: userId, scheduledAt: { gte: new Date() }, status: "SCHEDULED" } }),
+    prisma.application.groupBy({ by: ["jobId", "status"], where: { job: { employerId: employer.id } }, _count: { _all: true } }),
   ]);
-  res.json({ employer, summary: { totalJobs, publishedJobs, draftJobs, pendingApprovalJobs, applications, pendingApplications, shortlistedCandidates, upcomingInterviews } });
+  const jobs = employer.jobs.map((job) => {
+    const counts = applicationGroups.filter((group) => group.jobId === job.id);
+    const count = (statuses: string[]) => counts.filter((group) => statuses.includes(group.status)).reduce((sum, group) => sum + group._count._all, 0);
+    return { ...job, applicationSummary: { total: count(["APPLIED", "VIEWED", "SHORTLISTED", "INTERVIEW", "OFFERED", "HIRED", "REJECTED", "WITHDRAWN"]), shortlisted: count(["SHORTLISTED"]), pending: count(["APPLIED", "VIEWED"]), rejected: count(["REJECTED"]) } };
+  });
+  res.json({ employer: { ...employer, jobs }, summary: { totalJobs, publishedJobs, draftJobs, pendingApprovalJobs, applications, pendingApplications, shortlistedCandidates, upcomingInterviews } });
 });
 recruitersRouter.patch("/me", async (req, res) => {
   const p = z.object({

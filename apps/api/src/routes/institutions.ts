@@ -9,7 +9,7 @@ export const institutionsRouter = Router();
 institutionsRouter.get("/", async (req, res) => {
   const q = String(req.query.q || "").slice(0, 100);
   const rows = await prisma.institution.findMany({
-    where: { verified: true, ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { city: { contains: q, mode: "insensitive" } }, { state: { contains: q, mode: "insensitive" } }] } : {}) },
+    where: { verified: true, deletedAt:null, ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { city: { contains: q, mode: "insensitive" } }, { state: { contains: q, mode: "insensitive" } }] } : {}) },
     include: { departments: true }, orderBy: { name: "asc" }, take: 100
   });
   res.json({ data: rows });
@@ -226,7 +226,7 @@ institutionsRouter.get("/candidates", requireAuth("RECRUITER"), async (req, res)
   const institutionId = String(req.query.institutionId || "").slice(0, 100) || undefined;
   const location = String(req.query.location || "").trim().slice(0, 100);
   const q = String(req.query.q || "").trim().slice(0, 100);
-  const where = { recruiterVisible: true, institution: { verified: true, ...(institutionId ? { id: institutionId } : {}), ...(location ? { OR: [{ city: { contains: location, mode: "insensitive" as const } }, { state: { contains: location, mode: "insensitive" as const } }] } : {}) }, ...(department ? { department: { contains: department, mode: "insensitive" as const } } : {}), ...(passingYear ? { passingYear } : {}), ...(q ? { OR: [{ fullName: { contains: q, mode: "insensitive" as const } }, { headline: { contains: q, mode: "insensitive" as const } }, { profileSummary: { contains: q, mode: "insensitive" as const } }, { skills: { hasSome: [q] } }] } : {}) };
+  const where = { recruiterVisible: true, institution: { verified: true,deletedAt:null, ...(institutionId ? { id: institutionId } : {}), ...(location ? { OR: [{ city: { contains: location, mode: "insensitive" as const } }, { state: { contains: location, mode: "insensitive" as const } }] } : {}) }, ...(department ? { department: { contains: department, mode: "insensitive" as const } } : {}), ...(passingYear ? { passingYear } : {}), ...(q ? { OR: [{ fullName: { contains: q, mode: "insensitive" as const } }, { headline: { contains: q, mode: "insensitive" as const } }, { profileSummary: { contains: q, mode: "insensitive" as const } }, { skills: { hasSome: [q] } }] } : {}) };
   const data = await prisma.institutionStudent.findMany({ where, orderBy: [{ passingYear: "desc" }, { fullName: "asc" }], take: 100, select: { id: true, fullName: true, email: true, department: true, degree: true, passingYear: true, skills: true, headline: true, profileSummary: true, placementStatus: true, institution: { select: { id: true, name: true, city: true, state: true } } } });
   res.json({ data });
 });

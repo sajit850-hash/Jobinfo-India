@@ -94,8 +94,8 @@ authRouter.post("/password/change", requireAuth(), async (req, res) => {
 authRouter.post("/password/reset/request", async (req, res) => {
   const p = z.object({ email: z.string().trim().toLowerCase().email() }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: "Enter a valid email address" });
-  const user = await prisma.user.findUnique({ where: { email: p.data.email }, select: { id: true, email: true, isActive: true, sessionVersion: true } });
-  if (user?.isActive) {
+  const user = await prisma.user.findUnique({ where: { email: p.data.email }, select: { id: true, email: true, isActive: true, deletedAt:true, sessionVersion: true } });
+  if (user?.isActive&&!user.deletedAt) {
     try {
       const token = signPasswordResetToken(user);
       const resetUrl = new URL("/account/security/reset", config.webOrigin);
@@ -117,10 +117,10 @@ authRouter.post("/password/reset", async (req, res) => {
   if (!p.success) return res.status(400).json({ error: p.error.issues[0].message });
   const claims = readPasswordResetToken(p.data.token);
   if (!claims) return res.status(400).json({ error: "Reset link is invalid or expired. Request a new link." });
-  const user = await prisma.user.findUnique({ where: { id: claims.id }, select: { id: true, isActive: true, sessionVersion: true } });
-  if (!user?.isActive || user.sessionVersion !== claims.sessionVersion) return res.status(400).json({ error: "Reset link is invalid or expired. Request a new link." });
+  const user = await prisma.user.findUnique({ where: { id: claims.id }, select: { id: true, isActive: true, deletedAt:true, sessionVersion: true } });
+  if (!user?.isActive || user.deletedAt || user.sessionVersion !== claims.sessionVersion) return res.status(400).json({ error: "Reset link is invalid or expired. Request a new link." });
   const updated = await prisma.user.updateMany({
-    where: { id: user.id, isActive: true, sessionVersion: claims.sessionVersion },
+    where: { id: user.id, isActive: true, deletedAt:null, sessionVersion: claims.sessionVersion },
     data: { passwordHash: await bcrypt.hash(p.data.newPassword, 12), sessionVersion: { increment: 1 } },
   });
   if (updated.count !== 1) return res.status(400).json({ error: "Reset link is invalid or expired. Request a new link." });
@@ -136,7 +136,7 @@ authRouter.post("/login", async (req, res) => {
   }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: "Enter a valid email and password" });
   const user = await prisma.user.findUnique({ where: { email: p.data.email } });
-  const ok = user && user.isActive && (await bcrypt.compare(p.data.password, user.passwordHash));
+  const ok = user && user.isActive && !user.deletedAt && (await bcrypt.compare(p.data.password, user.passwordHash));
   if (!user || !ok) return res.status(401).json({ error: "Incorrect email or password" });
   if (p.data.expectedRole && user.role !== p.data.expectedRole) return res.status(401).json({ error: "These credentials do not match this account type." });
   setSession(res, { id: user.id, role: user.role, sessionVersion: user.sessionVersion });
@@ -153,9 +153,9 @@ authRouter.get("/me", async (req, res) => {
   if (!s) return res.json({ user: null });
   const u = await prisma.user.findUnique({
     where: { id: s.id },
-    select: { id: true, fullName: true, email: true, role: true, sessionVersion: true, isActive: true },
+    select: { id: true, fullName: true, email: true, role: true, sessionVersion: true, isActive: true, deletedAt:true },
   });
-  if (!u?.isActive || u.sessionVersion !== s.sessionVersion) return res.json({ user: null });
-  const { sessionVersion: _sessionVersion, isActive: _isActive, ...safeUser } = u;
+  if (!u?.isActive || u.deletedAt || u.sessionVersion !== s.sessionVersion) return res.json({ user: null });
+  const { sessionVersion: _sessionVersion, isActive: _isActive, deletedAt:_deletedAt, ...safeUser } = u;
   res.json({ user: safeUser });
 });

@@ -1,14 +1,20 @@
 "use client";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Page } from "@/components/SiteChrome";
 import { api } from "@/lib/api";
 
 type Job = { id:string; title:string; description:string; location:string; category:string|null; employmentType:string|null; experienceMin:number|null; experienceMax:number|null; salaryMin:number|null; salaryMax:number|null; status:string; draft?:{currentStep:number}|null; _count:{applications:number} };
-export default function RecruiterJobs() {
+function RecruiterJobsContent() {
+  const search = useSearchParams();
   const [jobs, setJobs] = useState<Job[]>([]); const [editing, setEditing] = useState<Job|null>(null); const [error, setError] = useState(""); const [message, setMessage] = useState(""); const [busy, setBusy] = useState("");
+  const [filter, setFilter] = useState(search.get("filter") || "all");
+  const routeFilter = search.get("filter") || "all";
   const refresh = () => api<{data:Job[]}>("/api/v1/jobs/mine").then((r) => r.ok ? setJobs(r.data.data) : setError(r.data.error || "Sign in as a recruiter to manage jobs."));
   useEffect(() => { void refresh(); }, []);
+  useEffect(() => { setFilter(routeFilter); }, [routeFilter]);
+  const visibleJobs = jobs.filter((job) => filter === "all" || (filter === "active" && ["PUBLISHED", "ACTIVE"].includes(job.status)) || (filter === "pending" && ["PENDING_APPROVAL", "PENDING_REVIEW"].includes(job.status)) || (filter === "closed" && ["CLOSED", "ARCHIVED", "EXPIRED"].includes(job.status)));
   const status = async (job: Job, next: string) => {
     if (next === "CLOSED" && !window.confirm(`Close “${job.title}”? Closed jobs cannot be reopened.`)) return;
     setBusy(job.id); setError(""); setMessage("");
@@ -31,7 +37,8 @@ export default function RecruiterJobs() {
   };
   return <Page><main className="wrap section recruiterJobs"><div className="sectionTitle"><div><p className="eyebrow">RECRUITER WORKSPACE</p><h1>Job management</h1></div><Link className="btn" href="/recruiter/jobs/new">Post a job</Link></div>
     {error && <div className="err">{error} <Link href="/login">Sign in</Link></div>}{message && <div className="info">{message}</div>}
-    <div className="applicationList">{jobs.map((job) => <article className="card managedJob" key={job.id}>
+    <label className="field recruiterJobFilter">Show jobs<select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">All jobs</option><option value="active">Active jobs</option><option value="pending">Pending approval</option><option value="closed">Closed jobs</option></select></label>
+    <div className="applicationList">{visibleJobs.map((job) => <article className="card managedJob" key={job.id}>
       <div className="managedJobHead"><div><h2>{job.title}</h2><p className="muted">{job.location} · {job.category || "Uncategorized"} · {job._count.applications} applications</p></div><span className={`statusPill status-${job.status.toLowerCase()}`}>{job.status.replaceAll("_", " ")}</span></div>
       {editing?.id === job.id ? <form className="jobEditForm" onSubmit={save}>
         <div className="row2"><label className="field">Title<input name="title" defaultValue={job.title} required minLength={3} /></label><label className="field">Location<input name="location" defaultValue={job.location} required /></label></div>
@@ -52,6 +59,10 @@ export default function RecruiterJobs() {
         <Link className="textLink" href="/recruiter/applications">Review applicants →</Link>
       </div>}
     </article>)}</div>
-    {!error && jobs.length === 0 && <div className="card emptyState"><h2>No jobs yet</h2><p className="muted">Create a job listing and track it through review and hiring.</p><Link className="btn" href="/recruiter/jobs/new">Post your first job</Link></div>}
+    {!error && visibleJobs.length === 0 && <div className="card emptyState"><h2>{jobs.length ? "No jobs in this status" : "No jobs yet"}</h2><p className="muted">{jobs.length ? "Choose a different job filter, or create another listing." : "Create a job listing and track it through review and hiring."}</p>{jobs.length ? <Link className="btn outline" href="/recruiter/jobs?filter=all">View all jobs</Link> : <Link className="btn" href="/recruiter/jobs/new">Post your first job</Link>}</div>}
   </main></Page>;
+}
+
+export default function RecruiterJobs() {
+  return <Suspense fallback={<Page><main className="wrap section"><p>Loading your jobs…</p></main></Page>}><RecruiterJobsContent /></Suspense>;
 }

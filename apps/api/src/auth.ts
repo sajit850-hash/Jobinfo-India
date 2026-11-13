@@ -47,8 +47,8 @@ export function requireAuth(...roles: string[]) {
   return async (req: Request, res: Response, next: NextFunction) => {
     const u = readSession(req);
     if (!u) return res.status(401).json({ error: "Not signed in" });
-    const current = await prisma.user.findUnique({ where: { id: u.id }, select: { role: true, isActive: true, sessionVersion: true } });
-    if (!current?.isActive || current.sessionVersion !== u.sessionVersion) return res.status(401).json({ error: "Session expired. Sign in again." });
+    const current = await prisma.user.findUnique({ where: { id: u.id }, select: { role: true, isActive: true, deletedAt:true, sessionVersion: true } });
+    if (!current?.isActive || current.deletedAt || current.sessionVersion !== u.sessionVersion) return res.status(401).json({ error: "Session expired. Sign in again." });
     if (current.role !== u.role || (roles.length && !roles.includes(current.role))) return res.status(403).json({ error: "Forbidden" });
     (req as Request & { user: SessionUser }).user = u;
     next();

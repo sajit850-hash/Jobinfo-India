@@ -71,6 +71,8 @@ model User {
   phone             String?   @unique
   role              UserRole
   isActive          Boolean   @default(true)
+  deletedAt         DateTime?
+  deletionReason    String?
   emailVerifiedAt   DateTime?
   phoneVerifiedAt   DateTime?
   termsAcceptedAt   DateTime?
@@ -95,6 +97,8 @@ model User {
   recruiterInterviews Interview[] @relation("RecruiterInterviews")
   recruiterCandidateViews CandidateProfileView[] @relation("RecruiterCandidateViews")
   platformSettingsUpdated PlatformSetting[]
+
+  @@index([deletedAt])
 }
 
 model AdminProfile {
@@ -224,6 +228,9 @@ model Employer {
   city     String?
   recruiterType String @default("CORPORATE")
   verified Boolean @default(false)
+  verificationStatus String @default("PENDING")
+  verificationReason String?
+  verificationUpdatedAt DateTime?
   recruiterDesignation String?
   recruiterProfilePhotoKey String?
   recruiterDepartment String?
@@ -600,6 +607,11 @@ model Institution {
   city     String
   state    String
   verified Boolean @default(false)
+  verificationStatus String @default("PENDING")
+  verificationReason String?
+  verificationUpdatedAt DateTime?
+  deletedAt DateTime?
+  deletionReason String?
   institutionType String?
   category String?
   establishedYear Int?
@@ -623,6 +635,8 @@ model Institution {
   departments Department[]
   courses     InstitutionCourse[]
   students    InstitutionStudent[]
+
+  @@index([deletedAt])
 }
 
 model Department {
