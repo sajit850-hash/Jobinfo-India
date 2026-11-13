@@ -1,0 +1,90 @@
+services:
+  - type: web
+    name: jobinfo-india-api
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run db:generate && npm run build --workspace @jobinfo/database && npm run build --workspace @jobinfo/api
+    startCommand: npm start
+    healthCheckPath: /ready
+    autoDeployTrigger: checksPass
+    maxShutdownDelaySeconds: 60
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_UNPOOLED
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: AI_ENCRYPTION_KEY
+        generateValue: true
+      - key: WEB_ORIGIN
+        fromService:
+          type: web
+          name: jobinfo-india-web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: OTP_PROVIDER
+        value: http-json
+      - key: SMS_API_URL
+        sync: false
+      - key: SMS_API_KEY
+        sync: false
+      - key: SMS_SENDER_ID
+        sync: false
+      - key: EMAIL_PROVIDER
+        value: http-json
+      - key: EMAIL_API_URL
+        sync: false
+      - key: EMAIL_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: PAYMENT_PROVIDER
+        value: razorpay
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: FILE_STORAGE
+        value: s3
+      - key: AWS_ENDPOINT_URL_S3
+        sync: false
+      - key: AWS_REGION
+        value: us-east-1
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: OBJECT_STORAGE_BUCKET
+        sync: false
+
+  - type: web
+    name: jobinfo-india-web
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build --workspace @jobinfo/web
+    startCommand: npm run start --workspace @jobinfo/web
+    healthCheckPath: /
+    autoDeployTrigger: checksPass
+    maxShutdownDelaySeconds: 60
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: API_INTERNAL_URL
+        fromService:
+          type: web
+          name: jobinfo-india-api
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: jobinfo-india-api
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: NEXT_PUBLIC_SITE_URL
+        fromService:
+          type: web
+          name: jobinfo-india-web
+          envVarKey: RENDER_EXTERNAL_URL
