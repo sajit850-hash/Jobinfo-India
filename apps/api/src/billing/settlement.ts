@@ -8,7 +8,10 @@ export async function settlePayment(input: { transactionId: string; providerRefe
     if (tx.status === "PAID" || tx.status === "REFUNDED") return { ok: true, duplicate: true };
     if (tx.status !== "CREATED") throw new Error("Transaction is not awaiting payment");
     if (input.status === "FAILED") {
-      await prisma.$transaction([prisma.paymentTransaction.update({ where: { id: tx.id }, data: { status: "FAILED", providerRef: input.providerReference } }), ...(tx.subscriptionId ? [prisma.subscription.updateMany({ where: { id: tx.subscriptionId, status: "PENDING" }, data: { status: "FAILED" } })] : [])]);
+      await prisma.$transaction(async db => {
+        await db.paymentTransaction.update({ where: { id: tx.id }, data: { status: "FAILED", providerRef: input.providerReference } });
+        if (tx.subscriptionId) { await db.subscription.updateMany({ where: { id: tx.subscriptionId, status: "PENDING" }, data: { status: "FAILED" } }); await db.couponRedemption.updateMany({ where: { subscriptionId: tx.subscriptionId, status: "RESERVED" }, data: { status: "RELEASED" } }); }
+      });
       return { ok: true, status: "FAILED" };
     }
     const now = new Date();
@@ -22,6 +25,8 @@ export async function settlePayment(input: { transactionId: string; providerRefe
           if (current && !isRenewal) await db.subscription.updateMany({ where: { userId: tx.userId, status: "ACTIVE" }, data: { status: "CANCELLED" } });
           const start = isRenewal && current?.endsAt && current.endsAt > now ? current.endsAt : now;
           await db.subscription.update({ where: { id: subscription.id }, data: { status: "ACTIVE", startedAt: start, endsAt: new Date(start.getTime() + subscription.durationDays * 86400000), providerRef: input.providerReference } });
+          await db.couponRedemption.updateMany({ where: { subscriptionId: subscription.id, status: "RESERVED" }, data: { status: "REDEEMED" } });
+          await db.subscriptionEvent.create({ data: { subscriptionId: subscription.id, actorId: tx.userId, event: "PAYMENT_VERIFIED", next: { providerReference: input.providerReference, amountPaise: tx.amountPaise, couponCode: subscription.couponCode } } });
         }
       }
       await issueInvoice(db, { userId: tx.userId, paymentId: tx.id, amountPaise: tx.amountPaise, taxPaise: tx.taxPaise });

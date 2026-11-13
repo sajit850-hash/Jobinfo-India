@@ -4,6 +4,7 @@ import { prisma, Prisma } from "@jobinfo/database";
 import { requireAuth, userOf } from "../auth";
 import { callCustomAi } from "../integrations/custom-ai";
 import { parseBooleanSearch, searchWhere } from "./recruiters";
+import { consumePlanUsage, PlanAccessError } from "../billing/entitlements";
 
 export const atsRouter = Router();
 atsRouter.use(requireAuth("RECRUITER"));
@@ -49,6 +50,8 @@ atsRouter.post("/match/:jobId", async (req, res) => {
   let criteria: z.infer<typeof criteriaSchema>; let method = "keyword-baseline";
   try { const extracted = await extractCriteria(p.data.jdText || `${job.title}\n${job.description}\n${job.requirements.map((x) => x.name).join("\n")}`); criteria = extracted.criteria; method = extracted.method; }
   catch { return res.status(502).json({ error: "The configured AI provider could not process this job" }); }
+  try { await consumePlanUsage(userOf(req).id, "ats.matches", 1, req.get("x-idempotency-key")); }
+  catch (error) { if (error instanceof PlanAccessError) return res.status(error.status).json({ error: error.message, ...error.details }); throw error; }
   const skillNeeds = [...new Set([...job.skills.map((s) => s.name), ...criteria.requiredSkills, ...criteria.preferredSkills])];
   const whereClauses: Prisma.CandidateWhereInput[] = [{ OR: [{ searchable: true }, { applications: { some: { jobId: job.id } } }] }];
   if (p.data.booleanQuery?.trim()) { try { whereClauses.push(searchWhere(parseBooleanSearch(p.data.booleanQuery))); } catch (error) { return res.status(400).json({ error: error instanceof Error ? error.message : "Invalid Boolean query" }); } }

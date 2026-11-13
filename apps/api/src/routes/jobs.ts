@@ -2,13 +2,22 @@ import { Router } from "express";
 import crypto from "node:crypto";
 import { z } from "zod";
 import { settlePayment, taxFor } from "../billing/settlement";
-import { prisma, Prisma } from "@jobinfo/database";
+import { prisma, Prisma, JobStatus } from "@jobinfo/database";
 import { requireAuth, userOf } from "../auth";
 import { scoreJobForCandidate } from "../recommendations/job-match";
 import { getJobPostingPolicy } from "../platform/job-posting-policy";
 import { jobDescriptionPlainText, sanitizeJobDescriptionHtml, sanitizeJobDraftData } from "../security/job-description";
+import { assertPlanLimit, consumePlanUsage, PlanAccessError } from "../billing/entitlements";
+import { calculatePlanPrice, billingCycleDurationDays } from "../billing/plan-pricing";
 
 export const jobsRouter = Router();
+
+const ACTIVE_JOB_STATUSES: JobStatus[] = ["PENDING_APPROVAL", "PENDING_REVIEW", "PUBLISHED", "ACTIVE", "PAUSED"];
+async function countActiveFreeJobs(employerId: string) {
+  const freePlans = await prisma.jobPostingPlan.findMany({ where: { pricePaise: 0 }, select: { code: true } });
+  const codes = [...new Set(["FREE_JOB", ...freePlans.map(plan => plan.code)])];
+  return prisma.job.count({ where: { employerId, postingPlanCode: { in: codes }, status: { in: ACTIVE_JOB_STATUSES } } });
+}
 
 const makeReference = () => `JI-${new Date().getFullYear()}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
 const slugify = (title: string, reference: string) => `${title.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}-${reference.toLowerCase()}`;
@@ -66,8 +75,9 @@ const postingSchema = z.object({
   planCode:z.string().min(2).max(50).default("FREE_JOB"),
 }).passthrough();
 
-jobsRouter.get("/posting-plans", requireAuth("RECRUITER"), async (_req,res)=>{
-  const data=await prisma.jobPostingPlan.findMany({where:{active:true},orderBy:{pricePaise:"asc"}});
+jobsRouter.get("/posting-plans", requireAuth("RECRUITER"), async (req,res)=>{
+  const employer=await prisma.employer.findUnique({where:{userId:userOf(req).id},select:{recruiterType:true}});
+  const data=await prisma.jobPostingPlan.findMany({where:{active:true,status:"ACTIVE",visibility:"PUBLIC",currency:"INR",audience:{in:["ALL_RECRUITERS",employer?.recruiterType||"CORPORATE"]}},orderBy:[{displayOrder:"asc"},{pricePaise:"asc"}]});
   res.json({data});
 });
 
@@ -77,7 +87,7 @@ jobsRouter.get("/posting-policy", requireAuth("RECRUITER"), async (req,res)=>{
     prisma.employer.findUnique({ where: { userId: userOf(req).id }, select: { id: true, verified: true } }),
   ]);
   if (!employer) return res.status(404).json({ error: "Recruiter company profile not found" });
-  const activeFreeJobs = await prisma.job.count({ where: { employerId: employer.id, postingPlanCode: "FREE_JOB", status: { in: ["PENDING_APPROVAL","PENDING_REVIEW","PUBLISHED","ACTIVE","PAUSED"] } } });
+  const activeFreeJobs = await countActiveFreeJobs(employer.id);
   const reasons = [
     ...(!policy.enabled ? ["Job posting is currently disabled by the platform administrator"] : []),
     ...(!policy.freePostingEnabled ? ["Free job posting is currently disabled by the platform administrator"] : []),
@@ -99,7 +109,7 @@ jobsRouter.get("/:id/posting-entitlement", requireAuth("RECRUITER"), async (req,
 });
 
 jobsRouter.post("/:id/checkout", requireAuth("RECRUITER"), async (req,res)=>{
-  const p=z.object({planCode:z.string().min(2),returnUrl:z.string().url().optional()}).safeParse(req.body);
+  const p=z.object({planCode:z.string().min(2),billingCycle:z.string().max(30).optional(),returnUrl:z.string().url().optional()}).safeParse(req.body);
   if(!p.success)return res.status(400).json({error:"Select a valid posting plan"});
   const draft=await prisma.recruiterJobDraft.findFirst({where:{jobId:String(req.params.id),ownerId:userOf(req).id},include:{job:true}});
   if(!draft||draft.job.status!=="DRAFT")return res.status(404).json({error:"Draft not found"});
@@ -111,23 +121,26 @@ jobsRouter.post("/:id/checkout", requireAuth("RECRUITER"), async (req,res)=>{
     return res.status(200).json({mode:"free",authorized:true});
   }
   const plan=await prisma.jobPostingPlan.findUnique({where:{code:p.data.planCode}});
-  if(!plan||!plan.active)return res.status(404).json({error:"Posting plan is unavailable"});
-  if(plan.pricePaise===0){
+  if(!plan||!plan.active||plan.status!=="ACTIVE"||plan.visibility!=="PUBLIC")return res.status(404).json({error:"Posting plan is unavailable"});
+  const cycle=p.data.billingCycle||plan.billingCycle;
+  const price=calculatePlanPrice({...plan,amountPaise:plan.pricePaise},cycle);
+  if(price.subtotalPaise===0){
     const since=new Date(Date.now()-30*86400000);
     const used=await prisma.jobPostingTransaction.count({where:{userId:userOf(req).id,planId:plan.id,status:{in:["AUTHORIZED","PAID"]},createdAt:{gte:since}}});
     if(used>=plan.postingCredits)return res.status(409).json({error:"Your free posting credit has been used. Choose a paid plan."});
-    const tx=await prisma.jobPostingTransaction.create({data:{userId:userOf(req).id,jobId:draft.jobId,planId:plan.id,amountPaise:0,provider:"free",status:"AUTHORIZED",creditsGranted:1,validUntil:new Date(Date.now()+plan.durationDays*86400000)}});
+    const tx=await prisma.jobPostingTransaction.create({data:{userId:userOf(req).id,jobId:draft.jobId,planId:plan.id,amountPaise:0,provider:"free",status:"AUTHORIZED",creditsGranted:1,validUntil:new Date(Date.now()+billingCycleDurationDays(cycle,plan.durationDays)*86400000)}});
     const value=(draft.data as Record<string,unknown>); await prisma.recruiterJobDraft.update({where:{id:draft.id},data:{data:{...value,planCode:plan.code} as Prisma.InputJsonValue,version:{increment:1}}});
     return res.status(201).json({transactionId:tx.id,mode:"free",authorized:true});
   }
   if(!await prisma.billingProfile.findUnique({where:{userId:userOf(req).id}}))return res.status(409).json({error:"Add billing details in Plans and billing before paid checkout"});
-  const charge=taxFor(plan.pricePaise);
+  if(plan.currency!=="INR")return res.status(400).json({error:"The configured payment gateway currently supports INR posting plans only"});
+  const charge=taxFor(price.subtotalPaise);
   const transaction=await prisma.jobPostingTransaction.create({data:{userId:userOf(req).id,jobId:draft.jobId,planId:plan.id,amountPaise:charge.totalPaise,taxPaise:charge.taxPaise,currency:"INR",provider:process.env.PAYMENT_PROVIDER||"unconfigured"}});
   try{
     const provider=(await import("../integrations/registry")).getPaymentProvider();
-    const session=await provider.createCheckout({transactionId:transaction.id,amountPaise:charge.totalPaise,currency:"INR",description:`Jobinfo India job posting: ${plan.name}`,returnUrl:p.data.returnUrl||"http://localhost:3000/recruiter/jobs/create"});
+    const session=await provider.createCheckout({transactionId:transaction.id,amountPaise:charge.totalPaise,currency:plan.currency,description:`Jobinfo India job posting: ${plan.name}`,returnUrl:p.data.returnUrl||"http://localhost:3000/recruiter/jobs/create"});
     await prisma.jobPostingTransaction.update({where:{id:transaction.id},data:{provider:session.provider,providerRef:session.providerReference}});
-    return res.status(201).json({transactionId:transaction.id,checkoutUrl:session.checkoutUrl,mode:session.mode,subtotalPaise:plan.pricePaise,gstPaise:charge.taxPaise,totalPaise:charge.totalPaise});
+    return res.status(201).json({transactionId:transaction.id,checkoutUrl:session.checkoutUrl,mode:session.mode,subtotalPaise:price.subtotalPaise,planDiscountPaise:price.planDiscountPaise,gstPaise:charge.taxPaise,totalPaise:charge.totalPaise});
   }catch(error){await prisma.jobPostingTransaction.update({where:{id:transaction.id},data:{status:"PROVIDER_NOT_CONFIGURED"}});return res.status(503).json({error:error instanceof Error?error.message:"Payment provider unavailable"});}
 });
 
@@ -157,28 +170,25 @@ jobsRouter.post("/:id/submit-approval",requireAuth("RECRUITER"),async(req,res)=>
   if(employer.name.trim().toLowerCase()!==data.basic.companyName.trim().toLowerCase())return res.status(400).json({error:"Company name must match your recruiter company profile"});
   if(policy.requireVerifiedRecruiter&&!employer.verified)return res.status(403).json({error:"Your company must be verified before posting"});
   if(data.basic.openings>policy.maxOpenings)return res.status(400).json({error:`A job post can have at most ${policy.maxOpenings} openings`});
-  const isFree=data.planCode==="FREE_JOB";
+  const legacyFree=data.planCode==="FREE_JOB";
+  const plan=legacyFree?null:await prisma.jobPostingPlan.findUnique({where:{code:data.planCode}});
+  const isFree=legacyFree||Boolean(plan&&calculatePlanPrice({...plan,amountPaise:plan.pricePaise},plan.billingCycle).subtotalPaise===0);
   if(isFree&&!policy.freePostingEnabled)return res.status(403).json({error:"Free job posting is currently disabled by the platform administrator"});
-  const plan=isFree?null:await prisma.jobPostingPlan.findUnique({where:{code:data.planCode}});
-  if(!isFree&&(!plan||!plan.active))return res.status(400).json({error:"Choose an active posting plan"});
+  if(!legacyFree&&(!plan||!plan.active||plan.status!=="ACTIVE"||plan.visibility!=="PUBLIC"))return res.status(400).json({error:"Choose an active posting plan"});
   if(plan){
     const entitlement=await prisma.jobPostingTransaction.findFirst({where:{jobId:draft.jobId,userId:userOf(req).id,planId:plan.id,status:{in:["AUTHORIZED","PAID"]},OR:[{validUntil:null},{validUntil:{gt:new Date()}}]},orderBy:{createdAt:"desc"}});
     if(!entitlement)return res.status(402).json({error:"Complete posting plan checkout before submitting this job"});
   }
   if(isFree&&policy.maxActiveFreeJobs>0){
-    const activeFreeJobs=await prisma.job.count({where:{employerId:employer.id,postingPlanCode:"FREE_JOB",status:{in:["PENDING_APPROVAL","PENDING_REVIEW","PUBLISHED","ACTIVE","PAUSED"]}}});
+    const activeFreeJobs=await countActiveFreeJobs(employer.id);
     if(activeFreeJobs>=policy.maxActiveFreeJobs)return res.status(403).json({error:`You have reached the limit of ${policy.maxActiveFreeJobs} active free jobs`});
   }
-  const activeSubscription=await prisma.subscription.findFirst({where:{userId:userOf(req).id,status:"ACTIVE",endsAt:{gt:new Date()}},orderBy:{endsAt:"desc"},select:{limits:true}});
-  const limits=(activeSubscription?.limits||{}) as Record<string,unknown>;
-  if(!isFree&&typeof limits.activeJobs==="number"){
+  {
     const activeJobs=await prisma.job.count({where:{employerId:employer.id,status:{in:["PENDING_APPROVAL","PENDING_REVIEW","PUBLISHED","ACTIVE","PAUSED"]}}});
-    if(activeJobs>=limits.activeJobs)return res.status(403).json({error:`Your active subscription allows ${limits.activeJobs} active jobs. Upgrade or close an active job to continue.`});
-  }
-  if(!isFree&&typeof limits.jobPostsPerMonth==="number"){
-    const monthStart=new Date();monthStart.setDate(1);monthStart.setHours(0,0,0,0);
-    const postsThisMonth=await prisma.jobPostingTransaction.count({where:{userId:userOf(req).id,status:{in:["AUTHORIZED","PAID"]},createdAt:{gte:monthStart}}});
-    if(postsThisMonth>=limits.jobPostsPerMonth)return res.status(403).json({error:`Your subscription's monthly job post limit is ${limits.jobPostsPerMonth}.`});
+    try { await assertPlanLimit(userOf(req).id,"jobs.active",activeJobs,1); }
+    catch(error){if(error instanceof PlanAccessError)return res.status(error.status).json({error:error.message,...error.details});throw error;}
+    try { await consumePlanUsage(userOf(req).id,"jobs.posts_monthly",1,`job-post:${draft.jobId}`); }
+    catch(error){if(error instanceof PlanAccessError)return res.status(error.status).json({error:error.message,...error.details});throw error;}
   }
   const location=[data.workplace.city,data.workplace.state,data.workplace.country].filter(Boolean).join(", ");
   const description=Object.entries({"About the Company":data.description.aboutCompany,"Job Overview":jobDescriptionPlainText(sanitizedOverview),"Key Responsibilities":data.description.responsibilities,"Required Qualifications":data.description.requiredQualifications,"Preferred Qualifications":data.description.preferredQualifications,"Technical Requirements":data.description.technicalRequirements,"Benefits and Perks":data.description.benefitsAndPerks,"Equal Opportunity":data.description.equalOpportunityStatement}).filter(([,v])=>v).map(([heading,value])=>`${heading}\n${value}`).join("\n\n");

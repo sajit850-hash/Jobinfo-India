@@ -10,7 +10,7 @@ import { api } from "@/lib/api";
 
 const stepNames = ["Basic information", "Workplace & location", "Job description", "Salary & compensation", "Application settings", "Screening questions", "Hiring team", "Recruitment preferences", "Review & preview", "Posting plan", "Publish job"];
 type DraftData = Record<string, any>;
-type PostingPlan = { id: string; code: string; name: string; description?: string | null; pricePaise: number; durationDays: number; features: string[] | unknown };
+type PostingPlan = { id: string; code: string; name: string; description?: string | null; pricePaise: number; prices?: Record<string, number>; billingCycle?: string; durationDays: number; features: string[] | unknown; currency?: string; discountType?: string; discountValue?: number; discountLabel?: string | null };
 const initialData: DraftData = {
   basic: { title: "", companyName: "", department: "", category: "", jobFunction: "", employmentType: "FULL_TIME", experienceLevel: "MID_LEVEL", experienceMin: 0, experienceMax: 5, openings: 1 },
   workplace: { workplaceType: "ON_SITE", country: "India", state: "", city: "", officeAddress: "", remoteEligibility: "", relocationAssistance: false, travelRequirement: "" },
@@ -20,7 +20,7 @@ const initialData: DraftData = {
   application: { method: "INTERNAL", externalUrl: "", deadline: "", resumeRequired: true, coverLetterRequired: false, allowUpdates: true, collectAdditionalInformation: false, confirmationEmail: true, maxApplications: null },
   screening: [], team: { members: [] },
   preferences: { urgent: false, immediateJoining: false, backgroundVerification: false, workAuthorization: "", interviewRounds: null, expectedJoiningDate: "", visibility: "PUBLIC" },
-  planCode: "FREE_JOB",
+  planCode: "",
 };
 
 function Field({ label, value, onChange, type = "text", required = false, min, max, placeholder }: { label: string; value: any; onChange: (value: any) => void; type?: string; required?: boolean; min?: number; max?: number; placeholder?: string }) {
@@ -56,7 +56,7 @@ function NewJobForm() {
   const [companyName, setCompanyName] = useState("");
 
   const setSection = (section: string, key: string, value: any) => setData((current) => ({ ...current, [section]: { ...current[section], [key]: value } }));
-  const selectedPlan = useMemo(() => plans.find((plan) => plan.code === data.planCode) || (data.planCode === "FREE_JOB" ? { id:"free",code:"FREE_JOB",name:"Free job posting",description:"Free listing, reviewed by the Jobinfo India team.",pricePaise:0,durationDays:30,features:["No payment or invoice","Admin approval before publication"]} : undefined), [plans, data.planCode]);
+  const selectedPlan = useMemo(() => plans.find((plan) => plan.code === data.planCode), [plans, data.planCode]);
 
   useEffect(() => {
     let active = true;
@@ -65,7 +65,10 @@ function NewJobForm() {
       if (!me.ok) { setError(me.data.error || "Sign in as a recruiter to post a job."); return; }
       setCompanyName(me.data.employer.name || "");
       setData((current) => ({ ...current, basic: { ...current.basic, companyName: me.data.employer.name || "" } }));
-      if (planResult.ok) setPlans(planResult.data.data);
+      if (planResult.ok) {
+        setPlans(planResult.data.data);
+        setData(current => current.planCode ? current : { ...current, planCode: planResult.data.data.find(plan => plan.pricePaise === 0)?.code || planResult.data.data[0]?.code || "" });
+      }
       const existingId = search.get("draft");
       if (existingId) {
         const loaded = await api<any>(`/api/v1/jobs/drafts/${existingId}`);
@@ -77,7 +80,7 @@ function NewJobForm() {
           const compatibleStep = storedStep <= 2 ? storedStep : storedStep === 3 ? 3 : storedStep - 1;
           setStep(needsRevision ? 8 : Math.max(0, Math.min(10, compatibleStep)));
           if (needsRevision) setNotice("This job needs changes before it can be approved. Review the details, edit the requested sections, then resubmit it.");
-          setData((current) => ({ ...current, ...loaded.data.draft.data, planCode:loaded.data.draft.data.planCode||"FREE_JOB", basic: { ...current.basic, ...loaded.data.draft.data.basic, companyName: me.data.employer.name || "" }, description: { overview: loaded.data.draft.data.description?.overview || "" } }));
+          setData((current) => ({ ...current, ...loaded.data.draft.data, planCode:loaded.data.draft.data.planCode || (planResult.ok ? (planResult.data.data.find(plan => plan.pricePaise === 0)?.code || planResult.data.data[0]?.code || "") : ""), basic: { ...current.basic, ...loaded.data.draft.data.basic, companyName: me.data.employer.name || "" }, description: { overview: loaded.data.draft.data.description?.overview || "" } }));
           const entitlement = await api<{ authorized: boolean }>(`/api/v1/jobs/${existingId}/posting-entitlement`);
           if (entitlement.ok && entitlement.data.authorized) setPostingAuthorized(true);
           if ((!entitlement.ok || !entitlement.data.authorized) && (search.get("razorpay_payment_link_id") || search.get("razorpay_payment_id"))) {
@@ -143,7 +146,7 @@ function NewJobForm() {
     setBusy(true); setError(""); setCheckoutUrl("");
     const saved = await saveDraft(step);
     if (!saved) { setBusy(false); return; }
-    const result = await api<any>(`/api/v1/jobs/${draftId}/checkout`, { method: "POST", body: JSON.stringify({ planCode: selectedPlan.code, returnUrl: `${window.location.origin}/recruiter/jobs/new?draft=${draftId}` }) });
+    const result = await api<any>(`/api/v1/jobs/${draftId}/checkout`, { method: "POST", body: JSON.stringify({ planCode: selectedPlan.code, billingCycle: selectedPlan.billingCycle || "ONE_TIME", returnUrl: `${window.location.origin}/recruiter/jobs/new?draft=${draftId}` }) });
     setBusy(false);
     if (!result.ok) { setError(result.data.error || "Could not start checkout."); return; }
     setData((current) => ({ ...current, planCode: selectedPlan.code }));
@@ -188,7 +191,7 @@ function NewJobForm() {
       case 6: return <><p className="muted">Invite teammates by email and choose what they can do for this job.</p>{data.team.members.map((member: any, index: number) => <article className="card wizardItem" key={index}><Field label="Team member email" type="email" value={member.email} onChange={(v) => updateMember(index, "email", v)} required/><div className="wizardToggleList">{[["VIEW_JOB","View job"],["EDIT_JOB","Edit job"],["VIEW_APPLICANTS","View applicants"],["DOWNLOAD_RESUMES","Download resumes"],["SHORTLIST_CANDIDATES","Shortlist candidates"],["REJECT_CANDIDATES","Reject candidates"],["MANAGE_APPLICATIONS","Manage applications"]].map(([permission, label]) => <Toggle key={permission} label={label} checked={member.permissions.includes(permission)} onChange={(on) => updateMember(index, "permissions", on ? [...member.permissions, permission] : member.permissions.filter((x: string) => x !== permission))}/>)}</div></article>)}<button type="button" className="btn outline" onClick={addMember}>Add hiring team member</button></>;
       case 7: return <><div className="wizardToggleList"><Toggle label="Mark as urgent hiring" checked={p.urgent} onChange={(v) => setSection("preferences", "urgent", v)}/><Toggle label="Immediate joining required" checked={p.immediateJoining} onChange={(v) => setSection("preferences", "immediateJoining", v)}/><Toggle label="Background verification required" checked={p.backgroundVerification} onChange={(v) => setSection("preferences", "backgroundVerification", v)}/></div><div className="wizardGrid"><Field label="Work authorization requirements" value={p.workAuthorization} onChange={(v) => setSection("preferences", "workAuthorization", v)}/><Field label="Interview rounds" type="number" min={1} max={20} value={p.interviewRounds} onChange={(v) => setSection("preferences", "interviewRounds", v)}/><Field label="Expected joining date" type="date" value={p.expectedJoiningDate} onChange={(v) => setSection("preferences", "expectedJoiningDate", v)}/><Choice label="Listing visibility" value={p.visibility} onChange={(v) => setSection("preferences", "visibility", v)} options={[["PUBLIC","Public â€” discoverable in job search"],["UNLISTED","Unlisted â€” link only"]]}/></div></>;
       case 8: return <><p className="muted">Review the details before selecting a posting plan. You can go back to edit any section.</p><div className="jobPreview"><p className="eyebrow">{b.companyName} | {b.department}</p><h2>{b.title || "Job title"}</h2><p>{[w.city, w.state, w.country].filter(Boolean).join(", ")} | {w.workplaceType.replace("_", " ")} | {b.employmentType.replaceAll("_", " ")}</p><p>{b.experienceMin} to {b.experienceMax} years | {b.openings} opening(s)</p>{c.disclose && <p>{c.currency} {c.minimum ?? "Not listed"} to {c.maximum ?? "Not listed"} / {c.period.toLowerCase()}</p>}<hr/><h3>Complete job description</h3><div className="jobPreviewRich" dangerouslySetInnerHTML={{ __html: d.overview || "<p>Add a job overview</p>" }} /><p className="muted">{a.method === "INTERNAL" ? "Candidates apply on Jobinfo India" : `Application link: ${a.externalUrl}`}</p></div></>;
-      case 9: return <><p className="muted">Choose a plan for this listing. Payments depend on the configured provider.</p><div className="grid3 recruiterPlanGrid">{plans.map((plan) => <article className={`card wizardPlan ${data.planCode === plan.code ? "selected" : ""}`} key={plan.id}><label className="wizardPlanChoice"><input type="radio" name="postingPlan" checked={data.planCode === plan.code} onChange={() => { setPostingAuthorized(false); setData((current) => ({ ...current, planCode: plan.code })); }}/><span><b>{plan.name}</b><strong>{plan.pricePaise ? `â‚¹${(plan.pricePaise / 100).toLocaleString("en-IN")}` : "Free"}</strong></span></label><p>{plan.description || `${plan.durationDays} day listing`}</p>{Array.isArray(plan.features) && <ul className="planFeatures">{plan.features.map((feature: any) => <li key={String(feature)}>{String(feature)}</li>)}</ul>}</article>)}</div>{!plans.length && <p className="muted">No active posting plans are available. Contact support.</p>}<button className="btn" type="button" disabled={busy || !selectedPlan || !draftId} onClick={checkout}>{busy ? "Processingâ€¦" : selectedPlan?.pricePaise ? "Continue to checkout" : postingAuthorized ? "Free plan selected" : "Select free plan"}</button>{checkoutUrl && <p><a className="textLink" href={checkoutUrl}>Open checkout</a></p>}{testMode && <button className="btn outline" type="button" disabled={busy} onClick={confirmTestPayment}>Confirm test payment (development only)</button>}</>;
+      case 9: return <><p className="muted">Choose a listing product. Prices and included features are managed by the platform.</p><div className="grid3 recruiterPlanGrid">{plans.map((plan) => { const amount = Number(plan.prices?.[plan.billingCycle || "ONE_TIME"] ?? plan.pricePaise); return <article className={`card wizardPlan ${data.planCode === plan.code ? "selected" : ""}`} key={plan.id}><label className="wizardPlanChoice"><input type="radio" name="postingPlan" checked={data.planCode === plan.code} onChange={() => { setPostingAuthorized(false); setData((current) => ({ ...current, planCode: plan.code })); }}/><span><b>{plan.name}</b><strong>{amount ? `₹${(amount / 100).toLocaleString("en-IN")}` : "Free"}</strong></span></label><p>{plan.description || `${plan.durationDays} day listing`}</p>{Array.isArray(plan.features) && <ul className="planFeatures">{plan.features.map((feature: any, index: number) => <li key={typeof feature === "string" ? feature : feature.key || index}>{typeof feature === "string" ? feature : feature.name}</li>)}</ul>}</article>; })}</div>{!plans.length && <p className="muted">No active posting plans are available. Contact support.</p>}<button className="btn" type="button" disabled={busy || !selectedPlan || !draftId} onClick={checkout}>{busy ? "Processing…" : (Number(selectedPlan?.prices?.[selectedPlan.billingCycle || "ONE_TIME"] ?? selectedPlan?.pricePaise) > 0) ? "Continue to checkout" : postingAuthorized ? "Free plan selected" : "Select free plan"}</button>{checkoutUrl && <p><a className="textLink" href={checkoutUrl}>Open checkout</a></p>}{testMode && <button className="btn outline" type="button" disabled={busy} onClick={confirmTestPayment}>Confirm test payment (development only)</button>}</>;
       default: return <><div className="info">{selectedPlan ? `${selectedPlan.name} plan selected.` : "Select a posting plan."} Your job will be submitted for review before it appears to candidates.</div><div className="jobPreview"><h2>{b.title || "Job title"}</h2><p>{b.companyName} Â· {[w.city, w.state, w.country].filter(Boolean).join(", ")}</p><p>{d.overview}</p><p className="muted">Plan: {selectedPlan?.name || "Not selected"} Â· {postingAuthorized ? "Posting entitlement confirmed" : "Complete plan selection or payment first"}</p></div></>;
     }
   };

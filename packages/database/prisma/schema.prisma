@@ -502,9 +502,34 @@ model JobPostingPlan {
   featured        Boolean  @default(false)
   features        Json
   active          Boolean  @default(true)
+  category        String   @default("JOB_POSTING")
+  audience        String   @default("ALL_RECRUITERS")
+  billingCycle    String   @default("ONE_TIME")
+  prices          Json     @default("{}")
+  currency        String   @default("INR")
+  displayOrder    Int      @default(0)
+  visibility      String   @default("PUBLIC")
+  status          String   @default("ACTIVE")
+  recommended     Boolean  @default(false)
+  customBadge     String?
+  setupFeePaise   Int      @default(0)
+  gracePeriodDays Int      @default(0)
+  autoRenewAllowed Boolean @default(false)
+  discountType    String   @default("NONE")
+  discountValue   Int      @default(0)
+  discountLabel   String?
+  discountStartsAt DateTime?
+  discountEndsAt  DateTime?
+  discountMaxPaise Int?
+  changePolicy    String   @default("NEW_ONLY")
+  version         Int      @default(1)
+  archivedAt      DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   transactions    JobPostingTransaction[]
+  versions        PlanVersion[] @relation("JobPostingPlanVersions")
+
+  @@index([audience, status, visibility, displayOrder])
 }
 
 model JobPostingTransaction {
@@ -717,9 +742,19 @@ model Subscription {
   planCode    String
   status      String   @default("PENDING")
   amountPaise Int
+  listPricePaise Int @default(0)
   audience    String   @default("CORPORATE")
   durationDays Int     @default(30)
   limits       Json    @default("{}")
+  planSnapshot Json    @default("{}")
+  planVersion  Int     @default(1)
+  pendingPlanSnapshot Json?
+  pendingPlanVersion Int?
+  billingCycle String @default("MONTHLY")
+  discountPaise Int @default(0)
+  couponCode String?
+  autoRenew Boolean @default(false)
+  pausedAt DateTime?
   currency    String   @default("INR")
   startedAt   DateTime?
   endsAt      DateTime?
@@ -727,6 +762,10 @@ model Subscription {
   createdAt   DateTime @default(now())
   user        User     @relation(fields: [userId], references: [id], onDelete: Restrict)
   transactions PaymentTransaction[]
+  usage SubscriptionUsage[]
+  usageTransactions UsageTransaction[]
+  events SubscriptionEvent[]
+  couponRedemptions CouponRedemption[]
   @@index([userId, status])
 }
 
@@ -852,8 +891,132 @@ model SubscriptionPlan {
   features    Json
   limits      Json     @default("{}")
   active      Boolean  @default(true)
+  category    String   @default("SUBSCRIPTION")
+  billingCycle String  @default("MONTHLY")
+  prices      Json     @default("{}")
+  currency    String   @default("INR")
+  displayOrder Int    @default(0)
+  visibility  String  @default("PUBLIC")
+  status      String  @default("ACTIVE")
+  featured    Boolean @default(false)
+  recommended Boolean @default(false)
+  customBadge String?
+  setupFeePaise Int @default(0)
+  renewalAmountPaise Int?
+  trialDays Int @default(0)
+  gracePeriodDays Int @default(0)
+  autoRenewAllowed Boolean @default(false)
+  discountType String @default("NONE")
+  discountValue Int @default(0)
+  discountLabel String?
+  discountStartsAt DateTime?
+  discountEndsAt DateTime?
+  discountMaxPaise Int?
+  changePolicy String @default("NEW_ONLY")
+  version Int @default(1)
+  archivedAt DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  versions    PlanVersion[] @relation("SubscriptionPlanVersions")
+
+  @@index([audience, status, visibility, displayOrder])
+}
+
+model PlanVersion {
+  id String @id @default(cuid())
+  subscriptionPlanId String?
+  jobPostingPlanId String?
+  version Int
+  config Json
+  changePolicy String @default("NEW_ONLY")
+  createdById String?
+  createdAt DateTime @default(now())
+  subscriptionPlan SubscriptionPlan? @relation("SubscriptionPlanVersions", fields: [subscriptionPlanId], references: [id], onDelete: Cascade)
+  jobPostingPlan JobPostingPlan? @relation("JobPostingPlanVersions", fields: [jobPostingPlanId], references: [id], onDelete: Cascade)
+  @@unique([subscriptionPlanId, version])
+  @@unique([jobPostingPlanId, version])
+  @@index([createdAt])
+}
+
+model PlanCoupon {
+  id String @id @default(cuid())
+  code String @unique
+  name String
+  description String?
+  planCode String?
+  audience String?
+  discountType String
+  discountValue Int
+  maxDiscountPaise Int?
+  minimumPurchasePaise Int @default(0)
+  startsAt DateTime?
+  endsAt DateTime?
+  maxUses Int?
+  perUserLimit Int @default(1)
+  firstPurchaseOnly Boolean @default(false)
+  renewalOnly Boolean @default(false)
+  stackable Boolean @default(false)
+  active Boolean @default(true)
+  createdById String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  redemptions CouponRedemption[]
+  @@index([active, startsAt, endsAt])
+  @@index([planCode, audience])
+}
+
+model CouponRedemption {
+  id String @id @default(cuid())
+  couponId String
+  userId String
+  subscriptionId String
+  discountPaise Int
+  status String @default("RESERVED")
+  createdAt DateTime @default(now())
+  coupon PlanCoupon @relation(fields: [couponId], references: [id], onDelete: Restrict)
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  @@unique([couponId, subscriptionId])
+  @@index([couponId, userId])
+}
+
+model SubscriptionUsage {
+  id String @id @default(cuid())
+  subscriptionId String
+  featureKey String
+  periodStart DateTime
+  periodEnd DateTime?
+  quantityUsed Int @default(0)
+  updatedAt DateTime @updatedAt
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  @@unique([subscriptionId, featureKey, periodStart])
+  @@index([featureKey, periodStart])
+}
+
+model UsageTransaction {
+  id String @id @default(cuid())
+  subscriptionId String
+  featureKey String
+  idempotencyKey String
+  quantity Int @default(1)
+  periodStart DateTime
+  createdAt DateTime @default(now())
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  @@unique([subscriptionId, featureKey, idempotencyKey])
+  @@index([subscriptionId, featureKey, createdAt])
+}
+
+model SubscriptionEvent {
+  id String @id @default(cuid())
+  subscriptionId String
+  actorId String?
+  event String
+  previous Json?
+  next Json?
+  reason String?
+  createdAt DateTime @default(now())
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  @@index([subscriptionId, createdAt])
+  @@index([actorId, createdAt])
 }
 
 model BillingCase {

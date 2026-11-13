@@ -11,6 +11,8 @@ import { notifyUser } from "../notifications/service";
 import { jobDescriptionPlainText, sanitizeJobDescriptionHtml } from "../security/job-description";
 import { config } from "../config";
 import { getEmailProvider, getResumeStorage } from "../integrations/registry";
+import { createAdminPlansRouter } from "./admin-plans";
+import { billingCycleDurationDays, billingCyclePrice } from "../billing/plan-pricing";
 
 export const adminRouter = Router();
 export const cmsRouter = Router();
@@ -355,31 +357,36 @@ adminRouter.get("/users/:id/photo", permission("MANAGE_USERS"), async (req,res) 
   catch { res.status(404).json({error:"Profile photo is unavailable"}); }
 });
 adminRouter.get("/billing/assignable-plans", permission("MANAGE_BILLING"), async (_req,res) => {
-  res.json({data:await prisma.subscriptionPlan.findMany({where:{active:true,amountPaise:0},orderBy:[{audience:"asc"},{name:"asc"}],select:{code:true,audience:true,name:true,durationDays:true,limits:true}})});
+  const plans=await prisma.subscriptionPlan.findMany({where:{active:true,status:"ACTIVE",visibility:"PUBLIC"},orderBy:[{audience:"asc"},{displayOrder:"asc"},{name:"asc"}]});
+  res.json({data:plans.filter(plan=>billingCyclePrice(plan,plan.billingCycle)+plan.setupFeePaise===0).map(plan=>({code:plan.code,audience:plan.audience,name:plan.name,durationDays:billingCycleDurationDays(plan.billingCycle,plan.durationDays),billingCycle:plan.billingCycle,limits:plan.limits,features:plan.features,version:plan.version}))});
 });
 adminRouter.post("/users/:id/subscription", permission("MANAGE_BILLING"), async (req,res) => {
   const p=z.object({planCode:z.string().trim().min(1).max(50),reason:z.string().trim().min(5).max(500)}).safeParse(req.body);
   if(!p.success)return res.status(400).json({error:p.error.issues[0].message});
   const [user,plan]=await Promise.all([prisma.user.findUnique({where:{id:String(req.params.id)},include:{employer:{select:{recruiterType:true}},institution:{select:{id:true}}}}),prisma.subscriptionPlan.findUnique({where:{code:p.data.planCode}})]);
-  if(!user)return res.status(404).json({error:"Account not found"});if(!plan||!plan.active)return res.status(404).json({error:"Active subscription plan not found"});
+  if(!user)return res.status(404).json({error:"Account not found"});if(!plan||!plan.active||plan.status!=="ACTIVE"||plan.visibility!=="PUBLIC")return res.status(404).json({error:"Active subscription plan not found"});
   const audience=user.role==="INSTITUTION"?"INSTITUTION":user.role==="RECRUITER"?(user.employer?.recruiterType||"CORPORATE"):null;
   if(!audience||plan.audience!==audience)return res.status(400).json({error:"This plan is not available for the account type"});
-  if(plan.amountPaise>0)return res.status(402).json({error:"Paid plans can only be activated by a confirmed payment. Assigning unpaid plans is not allowed."});
-  const startsAt=new Date(),endsAt=new Date(startsAt.getTime()+plan.durationDays*86400000);
+  if(billingCyclePrice(plan,plan.billingCycle)+plan.setupFeePaise>0)return res.status(402).json({error:"Paid plans can only be activated by a confirmed payment. Assigning unpaid plans is not allowed."});
+  const startsAt=new Date(),durationDays=billingCycleDurationDays(plan.billingCycle,plan.durationDays),endsAt=new Date(startsAt.getTime()+durationDays*86400000);
   const subscription=await prisma.$transaction(async tx=>{
     await tx.subscription.updateMany({where:{userId:user.id,status:"ACTIVE"},data:{status:"CANCELLED"}});
-    return tx.subscription.create({data:{userId:user.id,planCode:plan.code,audience:plan.audience,status:"ACTIVE",amountPaise:0,currency:"INR",durationDays:plan.durationDays,limits:plan.limits as Prisma.InputJsonValue,startedAt:startsAt,endsAt}});
+    const created=await tx.subscription.create({data:{userId:user.id,planCode:plan.code,audience:plan.audience,status:"ACTIVE",amountPaise:0,listPricePaise:0,currency:plan.currency,billingCycle:plan.billingCycle,planVersion:plan.version,planSnapshot:{code:plan.code,name:plan.name,audience:plan.audience,amountPaise:0,currency:plan.currency,billingCycle:plan.billingCycle,durationDays,features:plan.features,limits:plan.limits,version:plan.version},durationDays,limits:plan.limits as Prisma.InputJsonValue,startedAt:startsAt,endsAt}});
+    await tx.subscriptionEvent.create({data:{subscriptionId:created.id,actorId:userOf(req).id,event:"ADMIN_FREE_PLAN_ASSIGNED",next:{planCode:plan.code,version:plan.version},reason:p.data.reason}});
+    return created;
   });
   await audit(req,"ADMIN_FREE_PLAN_ASSIGNED","Subscription",subscription.id,{userId:user.id,planCode:plan.code,reason:p.data.reason});res.status(201).json({subscription});
 });
 adminRouter.patch("/subscriptions/:id", permission("MANAGE_BILLING"), async (req,res) => {
-  const p=z.object({action:z.enum(["EXTEND","CANCEL"]),days:z.number().int().min(1).max(3650).optional(),reason:z.string().trim().min(5).max(500)}).safeParse(req.body);
+  const p=z.object({action:z.enum(["EXTEND","CANCEL","PAUSE","ACTIVATE"]),days:z.number().int().min(1).max(3650).optional(),reason:z.string().trim().min(5).max(500)}).safeParse(req.body);
   if(!p.success)return res.status(400).json({error:p.error.issues[0].message});if(p.data.action==="EXTEND"&&!p.data.days)return res.status(400).json({error:"Choose an extension duration"});
   const current=await prisma.subscription.findUnique({where:{id:String(req.params.id)}});if(!current)return res.status(404).json({error:"Subscription not found"});
   if(p.data.action==="CANCEL"&&current.status!=="ACTIVE")return res.status(409).json({error:"Only active subscriptions can be cancelled"});
+  if(p.data.action==="PAUSE"&&current.status!=="ACTIVE")return res.status(409).json({error:"Only active subscriptions can be paused"});
+  if(p.data.action==="ACTIVATE"&&current.status!=="PAUSED")return res.status(409).json({error:"Only paused subscriptions can be reactivated"});
   if(p.data.action==="EXTEND"&&["CANCELLED","PENDING"].includes(current.status))return res.status(409).json({error:"Cancelled or pending subscriptions cannot be extended"});
-  const data=p.data.action==="CANCEL"?{status:"CANCELLED"}:{status:"ACTIVE",startedAt:current.startedAt||new Date(),endsAt:new Date(Math.max(current.endsAt?.getTime()||0,Date.now())+(p.data.days||0)*86400000)};
-  const subscription=await prisma.subscription.update({where:{id:current.id},data});
+  const data=p.data.action==="CANCEL"?{status:"CANCELLED"}:p.data.action==="PAUSE"?{status:"PAUSED",pausedAt:new Date()}:p.data.action==="ACTIVATE"?{status:"ACTIVE",pausedAt:null,endsAt:current.endsAt&&current.pausedAt?new Date(current.endsAt.getTime()+Math.max(0,Date.now()-current.pausedAt.getTime())):current.endsAt}:{status:"ACTIVE",startedAt:current.startedAt||new Date(),endsAt:new Date(Math.max(current.endsAt?.getTime()||0,Date.now())+(p.data.days||0)*86400000)};
+  const subscription=await prisma.$transaction(async tx=>{const updated=await tx.subscription.update({where:{id:current.id},data});await tx.subscriptionEvent.create({data:{subscriptionId:current.id,actorId:userOf(req).id,event:`ADMIN_SUBSCRIPTION_${p.data.action}`,previous:{status:current.status,endsAt:current.endsAt,pausedAt:current.pausedAt},next:{status:updated.status,endsAt:updated.endsAt,pausedAt:updated.pausedAt},reason:p.data.reason}});return updated;});
   await audit(req,`ADMIN_SUBSCRIPTION_${p.data.action}`,"Subscription",current.id,{previousStatus:current.status,newStatus:subscription.status,previousEndsAt:current.endsAt,newEndsAt:subscription.endsAt,reason:p.data.reason});
   res.json({subscription});
 });
@@ -418,33 +425,7 @@ adminRouter.put("/job-posting-settings", permission("MANAGE_PRICING"), async (re
   res.json({ settings: parsed.data });
 });
 
-adminRouter.get("/plans", permission("MANAGE_PRICING"), async (_req, res) => {
-  const [jobPostingPlans, subscriptionPlans] = await Promise.all([
-    prisma.jobPostingPlan.findMany({ orderBy: { pricePaise: "asc" } }),
-    prisma.subscriptionPlan.findMany({ orderBy: [{ audience: "asc" }, { amountPaise: "asc" }] }),
-  ]);
-  res.json({ jobPostingPlans, subscriptionPlans });
-});
-adminRouter.post("/plans/posting", permission("MANAGE_PRICING"), async (req, res) => {
-  const p = z.object({ code: z.string().trim().min(2).max(50), name: z.string().trim().min(2).max(100), description: z.string().max(500).optional(), pricePaise: z.number().int().min(0), durationDays: z.number().int().min(1).max(3650), postingCredits: z.number().int().min(1).max(10000), featured: z.boolean(), features: z.array(z.string().max(150)), active: z.boolean() }).safeParse(req.body);
-  if (!p.success) return res.status(400).json({ error: p.error.issues[0].message });
-  const plan = await prisma.jobPostingPlan.create({ data: { ...p.data, features: p.data.features } }); await audit(req, "POSTING_PLAN_CREATED", "JobPostingPlan", plan.id); res.status(201).json({ plan });
-});
-adminRouter.patch("/plans/posting/:id", permission("MANAGE_PRICING"), async (req, res) => {
-  const p = z.object({ name: z.string().trim().min(2).max(100).optional(), description: z.string().max(500).nullable().optional(), pricePaise: z.number().int().min(0).optional(), durationDays: z.number().int().min(1).max(3650).optional(), postingCredits: z.number().int().min(1).max(10000).optional(), featured: z.boolean().optional(), features: z.array(z.string().max(150)).optional(), active: z.boolean().optional() }).safeParse(req.body);
-  if (!p.success) return res.status(400).json({ error: p.error.issues[0].message });
-  const plan = await prisma.jobPostingPlan.update({ where: { id: String(req.params.id) }, data: p.data }); await audit(req, "POSTING_PLAN_UPDATED", "JobPostingPlan", plan.id); res.json({ plan });
-});
-adminRouter.post("/plans/subscription", permission("MANAGE_PRICING"), async (req, res) => {
-  const p = z.object({ code: z.string().trim().min(2).max(50), audience: z.enum(["FREELANCE", "CORPORATE", "INSTITUTION"]), name: z.string().trim().min(2).max(100), description: z.string().max(500).optional(), amountPaise: z.number().int().min(0), durationDays: z.number().int().min(1).max(3650), features: z.array(z.string().max(150)), limits: z.record(z.string(), z.number().int().min(0).max(1000000)).default({}), active: z.boolean() }).safeParse(req.body);
-  if (!p.success) return res.status(400).json({ error: p.error.issues[0].message });
-  const plan = await prisma.subscriptionPlan.create({ data: { ...p.data, features: p.data.features } }); await audit(req, "SUBSCRIPTION_PLAN_CREATED", "SubscriptionPlan", plan.id); res.status(201).json({ plan });
-});
-adminRouter.patch("/plans/subscription/:id", permission("MANAGE_PRICING"), async (req, res) => {
-  const p = z.object({ audience: z.enum(["FREELANCE", "CORPORATE", "INSTITUTION"]).optional(), name: z.string().trim().min(2).max(100).optional(), description: z.string().max(500).nullable().optional(), amountPaise: z.number().int().min(0).optional(), durationDays: z.number().int().min(1).max(3650).optional(), features: z.array(z.string().max(150)).optional(), limits: z.record(z.string(), z.number().int().min(0).max(1000000)).optional(), active: z.boolean().optional() }).safeParse(req.body);
-  if (!p.success) return res.status(400).json({ error: p.error.issues[0].message });
-  const plan = await prisma.subscriptionPlan.update({ where: { id: String(req.params.id) }, data: p.data }); await audit(req, "SUBSCRIPTION_PLAN_UPDATED", "SubscriptionPlan", plan.id); res.json({ plan });
-});
+adminRouter.use("/plans", createAdminPlansRouter(permission, audit));
 adminRouter.get("/billing", permission("MANAGE_BILLING"), async (_req, res) => {
   const [transactions, postingTransactions, subscriptions, cases, payments, posts, invoices] = await Promise.all([
     prisma.paymentTransaction.findMany({ orderBy: { createdAt: "desc" }, take: 100 }),

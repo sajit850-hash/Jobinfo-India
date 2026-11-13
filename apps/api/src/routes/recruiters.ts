@@ -4,6 +4,8 @@ import bcrypt from "bcryptjs";
 import { prisma, Prisma } from "@jobinfo/database";
 import { requireAuth, setSession, userOf } from "../auth";
 import { phoneSchema } from "../validation";
+import { consumePlanUsage, PlanAccessError } from "../billing/entitlements";
+import { getResumeStorage } from "../integrations/registry";
 
 export const recruitersRouter = Router();
 
@@ -182,6 +184,8 @@ recruitersRouter.get("/candidates", async (req, res) => {
   const page = Math.max(1, Math.min(1000, Number(req.query.page) || 1));
   const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 20));
   if (!q && !location && !department && !skills.length) return res.status(400).json({ error: "Add a keyword, skill, location or department filter" });
+  try { await consumePlanUsage(userOf(req).id, "candidate.searches", 1, req.get("x-idempotency-key")); }
+  catch (error) { if (error instanceof PlanAccessError) return res.status(error.status).json({ error: error.message, ...error.details }); throw error; }
   const clauses: Prisma.CandidateWhereInput[] = [{ searchable: true }];
   if (q) {
     try { clauses.push(searchWhere(parseBooleanSearch(q))); }
@@ -214,6 +218,21 @@ recruitersRouter.get("/candidates/:candidateId", async (req, res) => {
     workExperience: { orderBy: { startDate: "desc" } },
   } });
   if (!candidate) return res.status(404).json({ error: "Candidate profile not found or is private" });
+  try { await consumePlanUsage(userOf(req).id, "candidate.profile_views", 1, req.get("x-idempotency-key")); }
+  catch (error) { if (error instanceof PlanAccessError) return res.status(error.status).json({ error: error.message, ...error.details }); throw error; }
   await prisma.candidateProfileView.create({ data: { candidateId: candidate.id, recruiterId: userOf(req).id, source: "RECRUITER_PROFILE" } });
   res.json({ candidate });
+});
+
+recruitersRouter.get("/candidates/:candidateId/resume", async (req, res) => {
+  const employer = await prisma.employer.findUnique({ where: { userId: userOf(req).id }, select: { id: true } });
+  if (!employer) return res.status(404).json({ error: "Recruiter profile not found" });
+  const candidate = await prisma.candidate.findFirst({ where: { id: String(req.params.candidateId), OR: [{ searchable: true }, { applications: { some: { job: { employerId: employer.id } } } }] }, select: { id: true, resumeUrl: true } });
+  if (!candidate?.resumeUrl) return res.status(404).json({ error: "Candidate resume is unavailable" });
+  try { await consumePlanUsage(userOf(req).id, "candidate.resume_downloads", 1, req.get("x-idempotency-key")); }
+  catch (error) { if (error instanceof PlanAccessError) return res.status(error.status).json({ error: error.message, ...error.details }); throw error; }
+  try {
+    const file = await getResumeStorage().read(candidate.resumeUrl);
+    res.setHeader("Content-Type", file.contentType); res.setHeader("Content-Length", file.bytes.length); res.setHeader("Content-Disposition", `attachment; filename="${file.fileName.replace(/[\\\r\n\"]/g, "_")}"`); res.setHeader("Cache-Control", "private, no-store"); res.setHeader("X-Content-Type-Options", "nosniff"); res.send(file.bytes);
+  } catch { res.status(404).json({ error: "Candidate resume is unavailable" }); }
 });
