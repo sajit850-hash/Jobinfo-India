@@ -79,6 +79,7 @@ model User {
   registrationStatus RegistrationStatus @default(ACCOUNT_CREATED)
   registrationDraft Json?
   createdAt         DateTime  @default(now())
+  lastActiveAt      DateTime?
   updatedAt         DateTime  @updatedAt
 
   candidate Candidate?
@@ -96,6 +97,9 @@ model User {
   adminProfile AdminProfile?
   recruiterInterviews Interview[] @relation("RecruiterInterviews")
   recruiterCandidateViews CandidateProfileView[] @relation("RecruiterCandidateViews")
+  candidateActions CandidateRecruiterAction[] @relation("RecruiterCandidateActions")
+  candidateComments CandidateRecruiterComment[] @relation("RecruiterCandidateComments")
+  candidateRecommendations CandidateSearchRecommendation[]
   platformSettingsUpdated PlatformSetting[]
 
   @@index([deletedAt])
@@ -162,6 +166,11 @@ model Candidate {
   profilePhotoKey String?
   passingYear     Int?
   experienceYears Int?     // null = not specified, 0 = fresher
+  currentDesignation String?
+  currentCompany String?
+  currentIndustry String?
+  currentSalary Int?
+  preferredShift String?
   profileComplete Boolean  @default(false)
   searchable      Boolean  @default(false)
   dateOfBirth     DateTime?
@@ -192,6 +201,8 @@ model Candidate {
   workExperience WorkExperience[]
   savedJobs    SavedJob[]
   profileViews CandidateProfileView[]
+  recruiterActions CandidateRecruiterAction[]
+  recruiterComments CandidateRecruiterComment[]
 
   @@index([searchable, updatedAt])
 }
@@ -622,6 +633,45 @@ model CandidateProfileView {
   recruiter User @relation("RecruiterCandidateViews", fields: [recruiterId], references: [id], onDelete: Cascade)
   @@index([candidateId, viewedAt])
   @@index([recruiterId, viewedAt])
+  @@unique([candidateId, recruiterId])
+}
+
+model CandidateRecruiterAction {
+  id String @id @default(cuid())
+  candidateId String
+  recruiterId String
+  status String @default("VIEWED")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  recruiter User @relation("RecruiterCandidateActions", fields: [recruiterId], references: [id], onDelete: Cascade)
+  @@unique([candidateId, recruiterId])
+  @@index([recruiterId, status, updatedAt])
+}
+
+model CandidateRecruiterComment {
+  id String @id @default(cuid())
+  candidateId String
+  recruiterId String
+  body String
+  createdAt DateTime @default(now())
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  recruiter User @relation("RecruiterCandidateComments", fields: [recruiterId], references: [id], onDelete: Cascade)
+  @@index([candidateId, recruiterId, createdAt])
+}
+
+model CandidateSearchRecommendation {
+  id String @id @default(cuid())
+  recruiterId String
+  jdText String
+  fileName String?
+  jdFileKey String?
+  criteria Json
+  results Json
+  aiProvider String
+  createdAt DateTime @default(now())
+  recruiter User @relation(fields: [recruiterId], references: [id], onDelete: Cascade)
+  @@index([recruiterId, createdAt])
 }
 
 model Institution {

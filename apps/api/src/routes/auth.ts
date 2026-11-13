@@ -139,6 +139,7 @@ authRouter.post("/login", async (req, res) => {
   const ok = user && user.isActive && !user.deletedAt && (await bcrypt.compare(p.data.password, user.passwordHash));
   if (!user || !ok) return res.status(401).json({ error: "Incorrect email or password" });
   if (p.data.expectedRole && user.role !== p.data.expectedRole) return res.status(401).json({ error: "These credentials do not match this account type." });
+  await prisma.user.update({ where: { id: user.id }, data: { lastActiveAt: new Date() } });
   setSession(res, { id: user.id, role: user.role, sessionVersion: user.sessionVersion });
   res.json({ ok: true, role: user.role });
 });

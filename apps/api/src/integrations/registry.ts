@@ -14,10 +14,10 @@ class ConsoleSmsProvider implements SmsProvider {
 }
 class ConsoleEmailProvider implements EmailProvider {
   readonly name = "console";
-  async send(input: { to: string; subject: string; text: string }) {
+  async send(input: { to: string; bcc?: string[]; subject: string; text: string }) {
     if (config.isProd) throw new Error("Console email provider is development-only.");
     const safeText = input.text.replace(/([?&]token=)[^&\s]+/g, "$1[redacted]");
-    console.info(`[DEV EMAIL] to=${input.to} subject=${input.subject}\n${safeText}`);
+    console.info(`[DEV EMAIL] to=${input.to} bcc=${input.bcc?.length || 0} subject=${input.subject}\n${safeText}`);
   }
 }
 class MockPaymentProvider implements PaymentProvider {

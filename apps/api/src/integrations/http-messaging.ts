@@ -20,7 +20,7 @@ export class HttpJsonSmsProvider implements SmsProvider {
 }
 export class HttpJsonEmailProvider implements EmailProvider {
   readonly name = "http-json";
-  async send(input: { to: string; subject: string; text: string; html?: string }) {
-    await postJson(endpoint(process.env.EMAIL_API_URL, "Email"), process.env.EMAIL_API_KEY, { from: process.env.EMAIL_FROM || undefined, to: input.to, subject: input.subject, text: input.text, html: input.html });
+  async send(input: { to: string; bcc?: string[]; subject: string; text: string; html?: string }) {
+    await postJson(endpoint(process.env.EMAIL_API_URL, "Email"), process.env.EMAIL_API_KEY, { from: process.env.EMAIL_FROM || undefined, to: input.to, bcc: input.bcc, subject: input.subject, text: input.text, html: input.html });
   }
 }

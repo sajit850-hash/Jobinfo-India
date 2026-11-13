@@ -9,7 +9,7 @@ export interface SmsProvider {
 }
 export interface EmailProvider {
   readonly name: string;
-  send(input: { to: string; subject: string; text: string; html?: string }): Promise<void>;
+  send(input: { to: string; bcc?: string[]; subject: string; text: string; html?: string }): Promise<void>;
 }
 export interface PaymentSession {
   provider: string;
