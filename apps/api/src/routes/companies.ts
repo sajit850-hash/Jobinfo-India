@@ -5,10 +5,11 @@ export const companiesRouter = Router();
 
 companiesRouter.get("/", async (req, res) => {
   const q = String(req.query.q || "").trim().slice(0, 100);
+  const liveListing={status:"PUBLISHED" as const,visibility:"PUBLIC" as const,OR:[{expiresAt:null},{expiresAt:{gt:new Date()}}]};
   const companies = await prisma.employer.findMany({
     where: {
       verified: true,
-      jobs: { some: { status: "PUBLISHED" } },
+      jobs: { some: liveListing },
       ...(q ? { OR: [
         { name: { contains: q, mode: "insensitive" } },
         { industry: { contains: q, mode: "insensitive" } },
@@ -17,7 +18,7 @@ companiesRouter.get("/", async (req, res) => {
     },
     select: {
       id: true, name: true, website: true, industry: true, city: true,
-      jobs: { where: { status: "PUBLISHED" }, select: { id: true }, take: 1 },
+      jobs: { where: liveListing, select: { id: true }, take: 1 },
     },
     orderBy: { name: "asc" },
     take: 100,

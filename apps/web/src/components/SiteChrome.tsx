@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { NotificationsMenu } from "@/components/NotificationsMenu";
+import { BackButton } from "@/components/BackButton";
 
 const links = [
   ["Find Jobs", "/jobs"],
   ["Companies", "/companies"],
-  ["Institutions", "/institutions"],
-  ["Pricing", "/pricing"],
-  ["For Recruiters", "/for-recruiters"],
+  ["Career Resources", "/faqs"],
+  ["For Employers", "/for-recruiters"],
+  ["For Institutions", "/institutions"],
 ] as const;
 
 export function Header() {
@@ -38,9 +39,9 @@ export function Header() {
 }
 
 const footerLinks = [
-  ["About us", "/about"], ["Contact", "/contact"], ["FAQs", "/faqs"],
-  ["Find jobs", "/jobs"], ["Companies", "/companies"], ["Institutions", "/institutions"],
-  ["For recruiters", "/for-recruiters"],
+  ["About us", "/about"], ["Contact", "/contact"], ["Help centre", "/faqs"],
+  ["Find jobs", "/jobs"], ["Companies", "/companies"], ["For employers", "/for-recruiters"],
+  ["For institutions", "/institutions"], ["Plans and pricing", "/pricing"],
 ] as const;
 
 export function Footer() {
@@ -58,5 +59,5 @@ export function Footer() {
 }
 
 export function Page({ children }: { children: React.ReactNode }) {
-  return <><Header />{children}<Footer /></>;
+  return <><Header /><BackButton />{children}<Footer /></>;
 }

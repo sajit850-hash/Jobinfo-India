@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Page } from "@/components/SiteChrome";
@@ -14,7 +14,7 @@ export default function RecruiterDashboard() {
   const refresh = () => api<any>("/api/v1/recruiters/me").then((r) => {
     if (!r.ok) { setError(r.data.error || "Please sign in as a recruiter."); return; }
     setData(r.data); setCompany({ name: r.data.employer.name || "", website: r.data.employer.website || "", industry: r.data.employer.industry || "", city: r.data.employer.city || "" });
-  });
+  }).catch(()=>setError("Could not reach the server while loading your recruiter dashboard. Refresh to try again."));
   useEffect(() => { void refresh(); }, []);
   const save = async (event: React.FormEvent) => {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
@@ -25,9 +25,13 @@ export default function RecruiterDashboard() {
     <p className="eyebrow">RECRUITER WORKSPACE</p><h1>Welcome{data?.employer?.name ? `, ${data.employer.name}` : ""}</h1>
     {error && <div className="err">{error} <Link href="/login">Sign in</Link></div>}{message && <div className="info">{message}</div>}
     {!data && !error ? <p className="muted">Loading your workspace…</p> : data && <>
-      <div className="grid3 dashboardStats"><article className="card"><span className="muted">All jobs</span><strong>{data.summary.totalJobs}</strong><Link href="/recruiter/jobs">Manage jobs →</Link></article>
-        <article className="card"><span className="muted">Published jobs</span><strong>{data.summary.publishedJobs}</strong><Link href="/recruiter/jobs/new">Post a job →</Link></article>
-        <article className="card"><span className="muted">Applications</span><strong>{data.summary.applications}</strong><Link href="/recruiter/applications">Review applicants →</Link></article></div>
+      <div className="dashboardStats recruiterStats">
+        <article className="card"><span className="muted">Active jobs</span><strong>{data.summary.publishedJobs}</strong><Link href="/recruiter/jobs">Manage jobs →</Link></article>
+        <article className="card"><span className="muted">Pending approvals</span><strong>{data.summary.pendingApprovalJobs}</strong><Link href="/recruiter/jobs">View submissions →</Link></article>
+        <article className="card"><span className="muted">Applications received</span><strong>{data.summary.applications}</strong><Link href="/recruiter/applications">View pipeline →</Link></article>
+        <article className="card"><span className="muted">Shortlisted</span><strong>{data.summary.shortlistedCandidates}</strong><Link href="/recruiter/applications">View shortlist →</Link></article>
+        <article className="card"><span className="muted">Interviews scheduled</span><strong>{data.summary.upcomingInterviews}</strong><Link href="/recruiter/applications">Manage interviews →</Link></article>
+      </div>
       <nav className="recruiterLinks"><Link className="card" href="/recruiter/jobs/new">Post a job</Link><Link className="card" href="/recruiter/jobs">Job management</Link><Link className="card" href="/recruiter/ats">ATS candidate matching</Link><Link className="card" href="/recruiter/candidates">Search candidates</Link><Link className="card" href="/recruiter/applications">Applications</Link><Link className="card" href="/recruiter/billing">Plans and billing</Link><Link className="card" href="/account/security">Security and privacy</Link></nav>
       <section className="card companyProfileCard"><div className="sectionTitle"><div><p className="eyebrow">COMPANY PROFILE</p><h2>{data.employer.name}</h2></div><button className="btn outline sm" onClick={() => setEditing(!editing)}>{editing ? "Cancel" : "Edit profile"}</button></div>
         {!editing ? <p className="muted">{[data.employer.industry, data.employer.city, data.employer.website].filter(Boolean).join(" · ") || "Add company details to help candidates learn about your organization."}</p> : <form className="companyForm" onSubmit={save}>

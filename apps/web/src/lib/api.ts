@@ -4,7 +4,11 @@ export const API_SERVER = process.env.API_INTERNAL_URL || process.env.NEXT_PUBLI
 export type Job = {
   id: string; title: string; company: string; verified: boolean; location: string;
   category: string | null; experienceMin: number | null; experienceMax: number | null;
-  salaryMin: number | null; salaryMax: number | null;
+  salaryMin: number | null; salaryMax: number | null; employmentType?: string | null;
+  salaryCurrency?: string | null; salaryPeriod?: string | null;
+  workplaceType?: "ON_SITE" | "REMOTE" | "HYBRID" | null; createdAt?: string;
+  featured?: boolean;
+  skills?: { name: string; kind: string }[];
 };
 
 export async function api<T = unknown>(path: string, init: RequestInit = {}): Promise<{ ok: boolean; data: T & { error?: string } }> {
@@ -22,5 +26,11 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
 
 export const expLabel = (j: Job) =>
   j.experienceMax === 0 ? "Fresher" : j.experienceMin != null ? `${j.experienceMin}-${j.experienceMax} yrs` : "";
-export const salaryLabel = (j: Job) =>
-  j.salaryMin != null ? `${j.salaryMin}-${j.salaryMax} LPA` : "Not disclosed";
+export const salaryLabel = (j: Job) => {
+  if(j.salaryMin==null)return "Not disclosed";
+  const currency=/^[A-Z]{3}$/.test(j.salaryCurrency||"")?j.salaryCurrency! : "INR";
+  const format=(amount:number)=>new Intl.NumberFormat("en-IN",{style:"currency",currency,maximumFractionDigits:0}).format(amount);
+  const range=j.salaryMax!=null&&j.salaryMax!==j.salaryMin?`${format(j.salaryMin)}–${format(j.salaryMax)}`:format(j.salaryMin);
+  const period=({ANNUAL:"per year",MONTHLY:"per month",DAILY:"per day",HOURLY:"per hour"} as Record<string,string>)[j.salaryPeriod||"ANNUAL"]||"per year";
+  return `${range} ${period}`;
+};

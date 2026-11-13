@@ -106,7 +106,7 @@ export default function CandidateProfile() {
     {error && <div className="err">{error} <Link href="/login">Sign in</Link></div>}{message && <div className="info">{message}</div>}
     {!profile ? <div className="card">Loading your profile…</div> : <>
       <section className="card profileFiles"><div><h2>Profile photo</h2><p className="muted">JPG, PNG or WEBP, up to 2 MB.</p>
-        {photoUrl && <img className="profilePhoto" src={photoUrl} alt="Your profile" />}
+        {photoUrl && <><img className="profilePhoto" src={photoUrl} alt="Your profile" /><a className="linkBtn" href={`${API}/api/v1/candidates/me/photo`} download>Download photo</a></>}
         <label className="fileControl">{profile.hasProfilePhoto ? "Change photo" : "Upload photo"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => upload(e.target.files?.[0], "photo")} /></label>
         {profile.hasProfilePhoto && <button className="linkBtn" type="button" onClick={() => removeFile("photo")}>Remove photo</button>}
       </div><div><h2>Resume</h2><p className="muted">PDF, DOC or DOCX, up to 5 MB. Only you can download your resume from this page.</p>

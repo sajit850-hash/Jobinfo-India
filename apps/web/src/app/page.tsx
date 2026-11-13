@@ -1,166 +1,58 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { Page } from "@/components/SiteChrome";
 import { Pricing } from "@/components/Pricing";
+import { SaveJobButton } from "@/components/SaveJobButton";
+import { ApplyButton } from "@/components/ApplyButton";
 import { API_SERVER as API, Job, expLabel, salaryLabel } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
-
-// Category counts and hero stats are placeholders from the prototype until real data exists.
-const categories = [
-  ["IT & Software", "12,400"], ["Sales & Marketing", "8,900"], ["Banking & Finance", "5,200"],
-  ["Healthcare", "4,100"], ["Education", "3,600"], ["HR & Admin", "2,800"],
-];
-const popular = ["Software Developer", "Sales Executive", "Accountant", "HR Recruiter", "Remote"];
-const stats = [["50K+", "Live Jobs"], ["10K+", "Companies"], ["2L+", "Candidates"], ["5K+", "Verified Recruiters"]];
-
-const premium = [
-  { tag: "Technology", title: "Technology & Engineering", items: [
-    ["AI/Machine Learning Architect", "Designs and scales artificial intelligence systems and infrastructure."],
-    ["Cloud Security Architect", "Orchestrates enterprise-grade security protocols for cloud platforms."],
-    ["Chief Technology Officer (CTO)", "Leads technology strategy and engineering teams."],
-    ["Data Science Director", "Turns big-data analytics into strategic business decisions."],
-    ["Principal Software Engineer", "Oversees technical execution and architecture of critical software systems."]] },
-  { tag: "Leadership", title: "Executive Leadership & Corporate Strategy", items: [
-    ["Chief Executive Officer (CEO)", "Manages company operations, resources and strategic direction."],
-    ["Chief Strategy Officer (CSO)", "Develops long-term corporate growth plans and M&A strategy."],
-    ["Management Consultant (Partner)", "Advises corporations on efficiency and organizational change."],
-    ["Sustainability Director (CSO)", "Leads ESG compliance and sustainability strategy."]] },
-  { tag: "Finance", title: "Finance & Investment", items: [
-    ["Investment Banking Managing Director", "Leads capital raising, restructuring and mergers and acquisitions."],
-    ["Quantitative Trader", "Uses mathematical models to identify trading opportunities."],
-    ["Chief Financial Officer (CFO)", "Oversees financial risks, planning and record-keeping."],
-    ["Private Equity Principal", "Manages investment portfolios and corporate acquisitions."]] },
-  { tag: "Healthcare", title: "Healthcare & Medicine", items: [
-    ["Healthcare Leadership", "Explore senior roles across healthcare operations and strategy."],
-    ["Medical & Clinical Careers", "Discover opportunities in medicine, clinical leadership and care delivery."]] },
-];
-
-const trust: [string, string, string, string, boolean?][] = [
-  ["in", "LinkedIn Verified Profile", "Show a LinkedIn verification badge only when the profile or credential is genuinely verified by LinkedIn.", "LinkedIn Verified"],
-  ["✓", "Recruiter-Endorsed Profile", "Highlight skills or experience endorsed by a recruiter, with the endorser and endorsement date where available.", "Recruiter Endorsed"],
-  ["✓", "Verified Job", "Mark a job as verified only after Jobinfo India completes the relevant checks on the posting and recruiter.", "Jobinfo Verified"],
-  ["✓", "Verified Freelance Recruiter", "Identify freelance recruiters whose submitted identity and contact details have been reviewed by Jobinfo India.", "Freelance Verified"],
-  ["↗", "Data Safety", "Explain how candidate and recruiter data is handled, protected, and shared with transparency and care.", "Data Safety", true],
-];
-
-const campus = [
-  ["⌂", "College & University Partners", "Help students discover verified jobs and internships."],
-  ["⌂", "Training Institute Partners", "Connect trained candidates with career opportunities."],
-  ["⌂", "Placement Cell Network", "Share relevant vacancies and career resources."],
-  ["⌂", "Career & Skill Centres", "Promote career guidance and skill development."],
-];
-
-async function featuredJobs(): Promise<Job[]> {
-  try {
-    const r = await fetch(`${API}/api/v1/jobs?featured=true&limit=6`, { cache: "no-store" });
-    return r.ok ? (await r.json()).data : [];
-  } catch {
-    return [];
-  }
+type Category={name:string;count:number};
+type Company={id:string;name:string;industry:string|null;city:string|null;hasOpenJobs?:boolean};
+async function fetchJson<T>(path:string):Promise<T|null>{try{const response=await fetch(`${API}${path}`,{cache:"no-store"});return response.ok?await response.json():null;}catch{return null;}}
+async function homepageData(){
+  const [featured,latest,categories,companies]=await Promise.all([
+    fetchJson<{data:Job[]}>("/api/v1/jobs?featured=true&limit=6"),
+    fetchJson<{data:Job[]}>("/api/v1/jobs?limit=6"),
+    fetchJson<{data:Category[]}>("/api/v1/jobs/categories"),
+    fetchJson<{data:Company[]}>("/api/v1/companies"),
+  ]);
+  const priority=featured?.data||[];
+  const jobs=priority.length?priority:(latest?.data||[]);
+  return {jobs,categories:categories?.data||[],companies:companies?.data||[]};
 }
 
-export default async function Home() {
-  const jobs = await featuredJobs();
-  return (
-    <Page>
-      <section className="hero">
-        <div className="wrap">
-          <h1>Find Your Dream Job in India</h1>
-          <p className="lead">Search 50,000+ jobs from verified recruiters and top companies</p>
-          <form className="search" action="/jobs">
-            <input name="q" placeholder="Job title, skill or company" />
-            <input name="location" placeholder="Location" />
-            <button className="btn">Search Jobs</button>
-          </form>
-          <div className="chips">
-            Popular:{popular.map((p) => <Link key={p} href={`/jobs?q=${encodeURIComponent(p)}`}>{p}</Link>)}
-          </div>
-        </div>
-      </section>
-
-      <section className="stats"><div className="wrap">
-        {stats.map(([n, l]) => <div className="stat" key={l}><b>{n}</b><span>{l}</span></div>)}
+export default async function Home(){
+  const {jobs,categories,companies}=await homepageData();
+  return <Page>
+    <main>
+      <section className="homeHero"><div className="wrap homeHeroInner">
+        <p className="eyebrow">JOBINFO INDIA · CAREERS THAT MOVE YOU</p>
+        <h1>Find work that fits<br/>your next chapter.</h1>
+        <p className="lead">Search current opportunities from employers on Jobinfo India.</p>
+        <form className="homeSearch" action="/jobs" role="search">
+          <label><span>Job title or skill</span><input name="q" placeholder="e.g. Accountant, React, Sales"/></label>
+          <label><span>Location</span><input name="location" placeholder="City, state or remote"/></label>
+          <label><span>Experience</span><select name="experienceMin" defaultValue=""><option value="">Any experience</option><option value="0">Fresher</option><option value="1">1+ years</option><option value="3">3+ years</option><option value="5">5+ years</option></select></label>
+          <button className="btn" type="submit">Search jobs</button>
+        </form>
+        <div className="homePopular"><span>Popular searches</span>{["Software Developer","Sales Executive","Accountant","HR Recruiter"].map(term=><Link key={term} href={`/jobs?q=${encodeURIComponent(term)}`}>{term}</Link>)}</div>
       </div></section>
 
-      <section className="soft"><div className="wrap section">
-        <h2>Browse by Category</h2>
-        <div className="grid3">
-          {categories.map(([n, c]) => (
-            <Link key={n} className="card cat" href={`/jobs?category=${encodeURIComponent(n)}`}><b>{n}</b><span>{c} jobs</span></Link>
-          ))}
-        </div>
+      <section className="wrap section homeSection"><div className="sectionTitle"><div><p className="eyebrow">EXPLORE</p><h2>Browse by category</h2></div><Link className="textLink" href="/jobs">All jobs →</Link></div>
+        {categories.length?<div className="categoryList">{categories.slice(0,12).map(category=><Link className="categoryLink" href={`/jobs?category=${encodeURIComponent(category.name)}`} key={category.name}><span>{category.name}</span><small>{category.count} {category.count===1?"opening":"openings"}</small></Link>)}</div>:<p className="muted">Categories will appear as employers publish jobs.</p>}
+      </section>
+
+      <section className="homeJobsBand"><div className="wrap section homeSection"><div className="sectionTitle"><div><p className="eyebrow">CURRENT OPENINGS</p><h2>{jobs.some(job=>job.featured)?"Featured jobs":"Recently posted jobs"}</h2><p className="muted">Explore live listings and review the details before applying.</p></div><Link className="btn outline" href="/jobs">Browse all jobs</Link></div>
+        {jobs.length?<div className="homeJobList">{jobs.map(job=><article className="homeJob" key={job.id}><div className="companyMark" aria-hidden="true">{job.company.trim().slice(0,1).toUpperCase()}</div><div className="homeJobMain"><Link className="homeJobTitle" href={`/job/${job.id}`}>{job.title}</Link><div className="homeJobCompany">{job.company}{job.verified&&<span className="verifiedMark">Verified employer</span>}</div><div className="homeJobMeta"><span>{job.location}</span>{expLabel(job)&&<span>{expLabel(job)}</span>}{job.employmentType&&<span>{job.employmentType.replaceAll("_"," ").toLowerCase()}</span>}{job.workplaceType&&<span>{job.workplaceType.replaceAll("_"," ").toLowerCase()}</span>}{salaryLabel(job)!=="Not disclosed"&&<span>{salaryLabel(job)}</span>}{job.createdAt&&<span>Posted {new Date(job.createdAt).toLocaleDateString("en-IN")}</span>}</div>{job.skills&&job.skills.length>0&&<div className="homeSkillList">{job.skills.slice(0,4).map(skill=><span key={`${job.id}-${skill.name}`}>{skill.name}</span>)}</div>}</div><div className="homeJobActions"><Link className="btn outline sm" href={`/job/${job.id}`}>View job</Link><SaveJobButton jobId={job.id}/><ApplyButton jobId={job.id}/></div></article>)}</div>:<div className="emptyState"><h3>No published jobs yet</h3><p className="muted">New openings will appear here once they are approved and published.</p><Link className="btn outline" href="/jobs">Search jobs</Link></div>}
       </div></section>
 
-      <section className="wrap section">
-        <h2>Featured Jobs</h2>
-        {jobs.length === 0 ? (
-          <p className="muted">No featured jobs yet. Run <code>npm run db:seed</code> to load sample jobs.</p>
-        ) : (
-          <div className="grid3">
-            {jobs.map((j) => (
-              <div className="card job" key={j.id}>
-                <button className="heart" aria-label="Save job">♡</button>
-                <h3>{j.title}</h3><div className="co">{j.company}</div>
-                <div className="tags">
-                  <span className="tag">{j.location}</span>
-                  {expLabel(j) && <span className="tag">{expLabel(j)}</span>}
-                  {j.verified && <span className="tag ok">Verified</span>}
-                </div>
-                <div className="jobFoot"><b>{salaryLabel(j)}</b><Link className="btn sm" href="/login">Apply</Link></div>
-              </div>
-            ))}
-          </div>
-        )}
+      <section className="wrap section homeSection"><div className="sectionTitle"><div><p className="eyebrow">EMPLOYERS</p><h2>Companies hiring on Jobinfo India</h2><p className="muted">Verified companies with published jobs.</p></div><Link className="textLink" href="/companies">Company directory →</Link></div>
+        {companies.length?<div className="companyList">{companies.slice(0,6).map(company=><article className="companyRow" key={company.id}><div className="companyMark" aria-hidden="true">{company.name.trim().slice(0,1).toUpperCase()}</div><div><b>{company.name}</b><small>{[company.industry,company.city].filter(Boolean).join(" · ")||"Company profile"}</small></div><Link className="textLink" href={`/jobs?q=${encodeURIComponent(company.name)}`}>View jobs →</Link></article>)}</div>:<p className="muted">Verified employers will appear here when they have published openings.</p>}
       </section>
 
-      <section className="soft"><div className="wrap section">
-        <p className="eyebrow">CURATED CAREER OPPORTUNITIES</p>
-        <h2>Premium Jobs</h2>
-        <p className="lead2">Explore high-impact roles across technology, executive leadership, finance and healthcare.</p>
-        <div className="prem">
-          {premium.map((g) => (
-            <div className="card" key={g.title}>
-              <span className="badge">PREMIUM</span>
-              <p className="eyebrow">{g.tag.toUpperCase()}</p>
-              <h4>{g.title}</h4>
-              <dl>{g.items.map(([t, d]) => <div key={t}><dt>{t}</dt><dd>{d}</dd></div>)}</dl>
-            </div>
-          ))}
-        </div>
-        <p className="fine">Premium placement should be clearly labelled and must not imply guaranteed hiring or verification.</p>
-      </div></section>
+      <section className="homeAudience"><div className="wrap homeAudienceGrid"><article><p className="eyebrow">FOR JOB SEEKERS</p><h2>Make your next move count.</h2><p>Create a profile, save relevant openings and keep track of your applications.</p><Link className="btn" href="/register/candidate">Create a candidate profile</Link></article><article><p className="eyebrow">FOR EMPLOYERS</p><h2>Build your hiring pipeline.</h2><p>Post a job, review applicants and manage hiring activity in one place.</p><div className="homeAudienceActions"><Link className="btn" href="/recruiter/register">Get started as a recruiter</Link><Link className="btn outline" href="/for-recruiters">Recruiter information</Link></div></article><article><p className="eyebrow">FOR INSTITUTIONS</p><h2>Support student outcomes.</h2><p>Organize student profiles, departments and placement activity.</p><Link className="btn outline" href="/institutions">Explore institution features</Link></article></div></section>
 
-      <section className="wrap section">
-        <p className="eyebrow">TRUST &amp; SAFETY</p>
-        <h2>Trust you can see. Safety you can count on.</h2>
-        <p className="lead2">Build confidence with clear, transparent trust signals. A badge appears only after the relevant verification or endorsement is completed.</p>
-        <div className="grid5">
-          {trust.map(([ic, t, d, l, g]) => (
-            <div className="card trust" key={t}>
-              <div className="icon">{ic}</div><h4>{t}</h4><p>{d}</p><div className={"label" + (g ? " g" : "")}>{l.toUpperCase()}</div>
-            </div>
-          ))}
-        </div>
-        <p className="fine">Verification badges are displayed only when the applicable checks have actually been completed. A badge is not a guarantee of employment or hiring outcomes.</p>
-      </section>
-
-      <section className="wrap" style={{ paddingBottom: 56 }}>
-        <h2>Campus &amp; Training Partnerships</h2>
-        <div className="grid4 campus">
-          {campus.map(([ic, t, d]) => (
-            <div className="card" key={t}><div className="icon">{ic}</div><h4 style={{ margin: 0 }}>{t}</h4><p>{d}</p><Link className="more" href="/institutions">Explore Partnership →</Link></div>
-          ))}
-        </div>
-      </section>
-
-      <Pricing />
-
-      <section className="wrap section">
-        <div className="cta">
-          <div className="card"><h3>I am a Candidate</h3><p>Create your profile, search jobs and apply in minutes.</p><Link className="btn" href="/register/candidate">Register as Candidate</Link></div>
-          <div className="card"><h3>I am a Recruiter</h3><p>Post jobs, verify your profile and hire faster.</p><Link className="btn" href="/recruiter/register">Start Hiring</Link></div>
-        </div>
-      </section>
-    </Page>
-  );
+      <section className="wrap section"><Pricing/></section>
+    </main>
+  </Page>;
 }

@@ -1,11 +1,13 @@
 import { Router } from "express";
 import { z } from "zod";
-import { prisma } from "@jobinfo/database";
+import { prisma, Prisma } from "@jobinfo/database";
 import { requireAuth, userOf } from "../auth";
 import crypto from "node:crypto";
 import { integrationStatus } from "../integrations/registry";
 import { callCustomAi, customAiStatus, encryptApiKey } from "../integrations/custom-ai";
 import { getPaymentProvider } from "../integrations/registry";
+import { getJobPostingPolicy, JOB_POSTING_POLICY_KEY, jobPostingPolicySchema } from "../platform/job-posting-policy";
+import { notifyUser } from "../notifications/service";
 
 export const adminRouter = Router();
 export const cmsRouter = Router();
@@ -262,6 +264,21 @@ adminRouter.patch("/employers/:id/verify", permission("MANAGE_REGISTRATIONS"), a
   await audit(req, p.data.verified ? "RECRUITER_COMPANY_APPROVED" : "RECRUITER_COMPANY_VERIFICATION_REVOKED", "Employer", employer.id);
   res.json({ employer });
 });
+adminRouter.get("/job-posting-settings", permission("MANAGE_PRICING"), async (_req, res) => {
+  res.json({ settings: await getJobPostingPolicy() });
+});
+adminRouter.put("/job-posting-settings", permission("MANAGE_PRICING"), async (req, res) => {
+  const parsed = jobPostingPolicySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+  const setting = await prisma.platformSetting.upsert({
+    where: { key: JOB_POSTING_POLICY_KEY },
+    create: { key: JOB_POSTING_POLICY_KEY, value: parsed.data as Prisma.InputJsonValue, updatedById: userOf(req).id },
+    update: { value: parsed.data as Prisma.InputJsonValue, updatedById: userOf(req).id },
+  });
+  await audit(req, "JOB_POSTING_POLICY_UPDATED", "PlatformSetting", setting.key, parsed.data);
+  res.json({ settings: parsed.data });
+});
+
 adminRouter.get("/plans", permission("MANAGE_PRICING"), async (_req, res) => {
   const [jobPostingPlans, subscriptionPlans] = await Promise.all([
     prisma.jobPostingPlan.findMany({ orderBy: { pricePaise: "asc" } }),
@@ -386,7 +403,7 @@ adminRouter.patch("/users/:id/status", permission("MANAGE_USERS"), async (req,re
   res.json({user});
 });
 adminRouter.get("/jobs", permission("MODERATE_JOBS"), async (_req,res) => {
-  const data=await prisma.job.findMany({where:{status:{in:["PENDING_REVIEW","PENDING_APPROVAL"]}},include:{employer:{select:{name:true,verified:true}},skills:true,requirements:true,benefits:true},orderBy:{createdAt:"asc"}});
+  const data=await prisma.job.findMany({where:{status:{in:["PENDING_REVIEW","PENDING_APPROVAL"]}},include:{employer:{select:{name:true,verified:true,userId:true,user:{select:{fullName:true,email:true}}}},skills:true,requirements:true,benefits:true,statusHistory:{orderBy:{createdAt:"desc"},take:5}},orderBy:{createdAt:"asc"}});
   res.json({data});
 });
 adminRouter.get("/institutions", permission("MANAGE_INSTITUTIONS"), async (_req, res) => {
@@ -394,22 +411,25 @@ adminRouter.get("/institutions", permission("MANAGE_INSTITUTIONS"), async (_req,
   res.json({ data });
 });
 adminRouter.patch("/jobs/:id/review", permission("MODERATE_JOBS"), async (req,res) => {
-  const p=z.object({decision:z.enum(["PUBLISHED","REJECTED"]),reason:z.string().max(500).optional()}).safeParse(req.body);
+  const p=z.object({decision:z.enum(["PUBLISHED","REJECTED","CHANGES_REQUESTED"]),reason:z.string().trim().max(500).optional()}).safeParse(req.body);
   if(!p.success)return res.status(400).json({error:"Invalid review decision"});
-  const existing=await prisma.job.findUnique({where:{id:String(req.params.id)},include:{postingTransactions:{where:{status:{in:["AUTHORIZED","PAID"]}},include:{plan:true},orderBy:{createdAt:"desc"},take:1}}});
+  if(p.data.decision!=="PUBLISHED"&&!p.data.reason)return res.status(400).json({error:"Provide a reason for rejection or requested changes"});
+  const existing=await prisma.job.findUnique({where:{id:String(req.params.id)},include:{employer:{select:{userId:true}},postingTransactions:{where:{status:{in:["AUTHORIZED","PAID"]}},include:{plan:true},orderBy:{createdAt:"desc"},take:1}}});
   if(!existing)return res.status(404).json({error:"Job not found"});
   if(!["PENDING_APPROVAL","PENDING_REVIEW"].includes(existing.status))return res.status(409).json({error:"Only jobs awaiting review can be moderated"});
-  if(p.data.decision==="PUBLISHED"&&existing.postingPlanCode&&!existing.postingTransactions[0])return res.status(402).json({error:"No valid posting entitlement exists for this job"});
+  if(p.data.decision==="PUBLISHED"&&existing.postingPlanCode&&existing.postingPlanCode!=="FREE_JOB"&&!existing.postingTransactions[0])return res.status(402).json({error:"No valid posting entitlement exists for this job"});
   if(p.data.decision==="PUBLISHED"&&!existing.employerId)return res.status(409).json({error:"Job has no company profile"});
   const next=p.data.decision;
   const plan=existing.postingTransactions[0]?.plan;
   const slug=next==="PUBLISHED"?`${existing.title.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")}-${(existing.jobReference||crypto.randomUUID()).toLowerCase()}`:existing.slug;
+  const policy=await getJobPostingPolicy();
   const job=await prisma.$transaction(async(tx)=>{
-    const updated=await tx.job.update({where:{id:existing.id},data:{status:next,slug,publishedAt:next==="PUBLISHED"?new Date():existing.publishedAt,expiresAt:next==="PUBLISHED"?new Date(Date.now()+(plan?.durationDays||30)*86400000):existing.expiresAt}});
+    const updated=await tx.job.update({where:{id:existing.id},data:{status:next,slug,publishedAt:next==="PUBLISHED"?new Date():existing.publishedAt,expiresAt:next==="PUBLISHED"?new Date(Date.now()+(plan?.durationDays||(existing.postingPlanCode==="FREE_JOB"?policy.expiryDays:30))*86400000):existing.expiresAt}});
     await tx.jobStatusHistory.create({data:{jobId:existing.id,previousStatus:existing.status,newStatus:next,changedById:userOf(req).id,reason:p.data.reason||null}});
-    await tx.auditLog.create({data:{actorId:userOf(req).id,action:`JOB_${next}`,entityType:"Job",entityId:existing.id,metadata:{reason:p.data.reason||null,jobReference:job.jobReference}}});
+    await tx.auditLog.create({data:{actorId:userOf(req).id,action:`JOB_${next}`,entityType:"Job",entityId:existing.id,metadata:{previousStatus:existing.status,newStatus:next,reason:p.data.reason||null,jobReference:updated.jobReference}}});
     return updated;
   });
+  if(existing.employer?.userId)await notifyUser({userId:existing.employer.userId,title:next==="PUBLISHED"?"Job approved and published":next==="REJECTED"?"Job posting rejected":"Changes requested for your job",body:next==="PUBLISHED"?`${existing.title} is now visible to candidates.`:`${existing.title}: ${p.data.reason}`,emailSubject:`Job posting update: ${existing.title}`});
   res.json({job});
 });
 adminRouter.patch("/institutions/:id/verify", permission("MANAGE_INSTITUTIONS"), async (req,res) => {

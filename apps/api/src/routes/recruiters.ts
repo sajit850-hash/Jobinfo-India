@@ -43,11 +43,17 @@ recruitersRouter.get("/me", async (req, res) => {
   const userId = userOf(req).id;
   const employer = await prisma.employer.findUnique({ where: { userId }, include: { user: { select: { fullName: true, email: true, phone: true, emailVerifiedAt: true, phoneVerifiedAt: true, registrationStatus: true } }, jobs: { orderBy: { createdAt: "desc" }, take: 20, include: { _count: { select: { applications: true } } } } } });
   if (!employer) return res.status(404).json({ error: "Recruiter profile not found" });
-  res.json({ employer, summary: {
-    totalJobs: await prisma.job.count({ where: { employerId: employer.id } }),
-    publishedJobs: await prisma.job.count({ where: { employerId: employer.id, status: "PUBLISHED" } }),
-    applications: await prisma.application.count({ where: { job: { employerId: employer.id } } })
-  } });
+  const [totalJobs, publishedJobs, draftJobs, pendingApprovalJobs, applications, pendingApplications, shortlistedCandidates, upcomingInterviews] = await Promise.all([
+    prisma.job.count({ where: { employerId: employer.id } }),
+    prisma.job.count({ where: { employerId: employer.id, status: "PUBLISHED" } }),
+    prisma.job.count({ where: { employerId: employer.id, status: "DRAFT" } }),
+    prisma.job.count({ where: { employerId: employer.id, status: { in: ["PENDING_APPROVAL","PENDING_REVIEW"] } } }),
+    prisma.application.count({ where: { job: { employerId: employer.id } } }),
+    prisma.application.count({ where: { job: { employerId: employer.id }, status: "APPLIED" } }),
+    prisma.application.count({ where: { job: { employerId: employer.id }, status: "SHORTLISTED" } }),
+    prisma.interview.count({ where: { recruiterId: userId, scheduledAt: { gte: new Date() }, status: "SCHEDULED" } }),
+  ]);
+  res.json({ employer, summary: { totalJobs, publishedJobs, draftJobs, pendingApprovalJobs, applications, pendingApplications, shortlistedCandidates, upcomingInterviews } });
 });
 recruitersRouter.patch("/me", async (req, res) => {
   const p = z.object({

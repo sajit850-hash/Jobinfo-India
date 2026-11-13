@@ -10,3 +10,6 @@ export const corporatePlans: Plan[] = [
   { name: "₹499 Plan", price: 499, featured: true, features: ["5 active job posts", "100 applicant views per month", "Company profile page", "5 Profile Recruiter Recommendation", "Email alerts"] },
   { name: "₹999 Plan", price: 999, features: ["15 active job posts", "500 applicant views per month", "Enhanced company profile", "Featured job post benefits", "5 Profile Recruiter Recommendation"] },
 ];
+export const institutionPlans: Plan[] = [
+  { name: "Institution Standard", price: 1999, featured: true, features: ["Student roster", "Placement tracking", "Recruiter visibility"] },
+];

@@ -15,7 +15,7 @@ export default function InstitutionDashboard() {
   const [department, setDepartment] = useState(""); const [student, setStudent] = useState<any>(blankStudent); const [editingStudent, setEditingStudent] = useState("");
   const [yearFilter, setYearFilter] = useState("ALL"); const [departmentFilter, setDepartmentFilter] = useState("ALL"); const [search, setSearch] = useState("");
   const [placementFor, setPlacementFor] = useState(""); const [placement, setPlacement] = useState({ companyName: "", jobTitle: "", status: "IN_PROGRESS", notes: "", placedAt: "" });
-  const refresh = async () => { const r = await api<any>("/api/v1/institutions/me"); if (!r.ok) { setError(r.data.error || "Sign in with an institution account."); return; } setData(r.data); setProfile({ name: r.data.institution.name, city: r.data.institution.city, state: r.data.institution.state, website: r.data.institution.website || "" }); };
+  const refresh = async () => { try { const r = await api<any>("/api/v1/institutions/me"); if (!r.ok) { setError(r.data.error || "Sign in with an institution account."); return; } setData(r.data); setProfile({ name: r.data.institution.name, city: r.data.institution.city, state: r.data.institution.state, website: r.data.institution.website || "" }); setError(""); } catch { setError("Could not reach the server while loading your institution dashboard. Refresh to try again."); } };
   useEffect(() => { void refresh(); }, []);
   const students: Student[] = data?.institution?.students || [];
   const years = useMemo(() => [...new Set(students.map((x) => x.passingYear))].sort((a, b) => b - a), [students]);

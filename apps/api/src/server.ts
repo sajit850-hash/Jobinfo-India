@@ -32,7 +32,10 @@ app.use((req, res, next) => {
   }
   next();
 });
-app.use(express.json({ limit: "8mb", verify: (req, _res, buffer) => { (req as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer); } }));
+// Private profile and institution documents are sent as base64 JSON. A 10 MB
+// file expands to roughly 13.4 MB, so the previous 8 MB parser limit rejected
+// uploads that the file endpoint itself explicitly accepts.
+app.use(express.json({ limit: "16mb", verify: (req, _res, buffer) => { (req as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer); } }));
 app.use(cookieParser());
 app.use("/api/v1", rateLimit({ windowMs: 15 * 60_000, limit: 300, standardHeaders: true, legacyHeaders: false, handler: (_req, res) => res.status(429).json({ error: "Too many requests. Try again later." }) }));
 app.use("/api/v1/privacy", privacyRouter);

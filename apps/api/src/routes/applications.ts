@@ -10,7 +10,7 @@ applicationsRouter.post("/", requireAuth("CANDIDATE"), async (req, res) => {
   if (!p.success) return res.status(400).json({ error: "A valid job ID is required" });
   const candidate = await prisma.candidate.findUnique({ where: { userId: userOf(req).id } });
   if (!candidate) return res.status(404).json({ error: "Candidate profile not found" });
-  const job = await prisma.job.findFirst({ where: { id: p.data.jobId, status: "PUBLISHED" }, include: { employer: { select: { userId: true } } } });
+  const job = await prisma.job.findFirst({ where: { id: p.data.jobId, status: "PUBLISHED", visibility:"PUBLIC", AND:[{OR:[{expiresAt:null},{expiresAt:{gt:new Date()}}]}] }, include: { employer: { select: { userId: true } } } });
   if (!job) return res.status(404).json({ error: "Job is not available" });
   let application;
   try { application = await prisma.application.create({ data: { candidateId: candidate.id, jobId: job.id, coverLetter: p.data.coverLetter, statusHistory: { create: { newStatus: "APPLIED", note: "Application submitted." } } } }); }

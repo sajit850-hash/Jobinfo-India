@@ -1,50 +1,33 @@
 import Link from "next/link";
 import { Page } from "@/components/SiteChrome";
+import { SaveJobButton } from "@/components/SaveJobButton";
+import { ApplyButton } from "@/components/ApplyButton";
 import { API_SERVER as API, Job, expLabel, salaryLabel } from "@/lib/api";
 import type { Metadata } from "next";
 
-export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Find jobs in India", description: "Search job openings by title, skills, company and location on Jobinfo India." };
-
-export default async function Jobs({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
-  const sp = await searchParams;
-  const qs = new URLSearchParams(Object.entries(sp).filter(([k]) => ["q", "location", "category", "page"].includes(k)));
-  let jobs: Job[] = [], total = 0, failed = false;
-  try {
-    const r = await fetch(`${API}/api/v1/jobs?${qs}`, { cache: "no-store" });
-    if (r.ok) { const j = await r.json(); jobs = j.data; total = j.total; } else failed = true;
-  } catch { failed = true; }
-
-  return (
-    <Page>
-      <section className="hero" style={{ padding: "36px 0" }}>
-        <div className="wrap">
-          <form className="search" action="/jobs">
-            <input name="q" defaultValue={sp.q} placeholder="Job title, skill or company" />
-            <input name="location" defaultValue={sp.location} placeholder="Location" />
-          <input name="category" defaultValue={sp.category} placeholder="Category" />
-            <button className="btn">Search Jobs</button>
-          </form>
-        </div>
-      </section>
-      <section className="wrap section">
-        <h2>{sp.category ?? "All jobs"} <small>({total} found)</small></h2>
-        {failed && <div className="err">Could not load jobs. Is the API running on port 4000?</div>}
-        {!failed && jobs.length === 0 && <p className="muted">No jobs match your search.</p>}
-        <div className="grid3">
-          {jobs.map((j) => (
-            <div className="card job" key={j.id}>
-              <h3>{j.title}</h3><div className="co">{j.company}</div>
-              <div className="tags">
-                <span className="tag">{j.location}</span>
-                {expLabel(j) && <span className="tag">{expLabel(j)}</span>}
-                {j.verified && <span className="tag ok">Verified</span>}
-              </div>
-              <div className="jobFoot"><b>{salaryLabel(j)}</b><Link className="btn sm" href={`/job/${j.id}`}>View job</Link></div>
-            </div>
-          ))}
-        </div>
-      </section>
-    </Page>
-  );
+export const dynamic="force-dynamic";
+export const metadata:Metadata={title:"Find jobs in India",description:"Search current job openings by title, skills, location and experience."};
+const queryKeys=["q","location","category","employmentType","workplaceType","experienceMin","experienceMax","salaryMin","salaryMax","skills","page","sort"];
+export default async function Jobs({searchParams}:{searchParams:Promise<Record<string,string|undefined>>}){
+  const params=await searchParams;const qs=new URLSearchParams();for(const [key,value] of Object.entries(params))if(queryKeys.includes(key)&&value)qs.set(key,value);
+  let jobs:Job[]=[],total=0,failed=false;try{const response=await fetch(`${API}/api/v1/jobs?${qs}`,{cache:"no-store"});if(response.ok){const result=await response.json();jobs=result.data;total=result.total;}else failed=true;}catch{failed=true;}
+  const page=Math.max(1,Number(params.page)||1),pageCount=Math.max(1,Math.ceil(total/12));
+  const pageUrl=(next:number)=>{const nextParams=new URLSearchParams(qs);nextParams.set("page",String(next));return `/jobs?${nextParams}`;};
+  return <Page><main className="wrap section jobsPage"><div className="jobsHeading"><div><p className="eyebrow">JOB SEARCH</p><h1>Find your next opportunity</h1><p className="muted">{total.toLocaleString("en-IN")} published {total===1?"job":"jobs"}{params.location?` near ${params.location}`:" across India"}</p></div></div>
+    <form className="jobsSearchBar" action="/jobs"><label><span>Role, skill or company</span><input name="q" defaultValue={params.q} placeholder="e.g. Product designer"/></label><label><span>Location</span><input name="location" defaultValue={params.location} placeholder="City, state or remote"/></label><button className="btn">Search</button></form>
+    <div className="jobSearchLayout"><aside className="card jobFilters"><div className="sectionTitle"><h2>Filters</h2><Link className="textLink" href="/jobs">Clear all</Link></div><form action="/jobs" className="jobFilterForm">{params.q&&<input type="hidden" name="q" value={params.q}/>}{params.location&&<input type="hidden" name="location" value={params.location}/>}
+      <label className="field">Category<input name="category" defaultValue={params.category} placeholder="e.g. Engineering"/></label>
+      <label className="field">Skills<input name="skills" defaultValue={params.skills} placeholder="Comma separated skills"/></label>
+      <label className="field">Minimum experience<select name="experienceMin" defaultValue={params.experienceMin||""}><option value="">Any experience</option><option value="0">Fresher</option><option value="1">1+ years</option><option value="3">3+ years</option><option value="5">5+ years</option><option value="10">10+ years</option></select></label>
+      <label className="field">Employment type<select name="employmentType" defaultValue={params.employmentType||""}><option value="">Any type</option><option value="FULL_TIME">Full-time</option><option value="PART_TIME">Part-time</option><option value="CONTRACT">Contract</option><option value="TEMPORARY">Temporary</option><option value="INTERN">Internship</option></select></label>
+      <label className="field">Work mode<select name="workplaceType" defaultValue={params.workplaceType||""}><option value="">Any work mode</option><option value="ON_SITE">On-site</option><option value="HYBRID">Hybrid</option><option value="REMOTE">Remote</option></select></label>
+      <details className="filterMore"><summary>Salary range</summary><div className="row2"><label className="field">Minimum (LPA)<input name="salaryMin" type="number" min="0" defaultValue={params.salaryMin}/></label><label className="field">Maximum (LPA)<input name="salaryMax" type="number" min="0" defaultValue={params.salaryMax}/></label></div></details>
+      <button className="btn block">Apply filters</button>
+    </form></aside>
+    <section className="jobResults"><div className="jobResultsHead"><div><h2>Job openings</h2><p className="muted">Showing {jobs.length?((page-1)*12+1):0}–{Math.min(page*12,total)} of {total}</p></div><form className="jobSort" action="/jobs">{Object.entries(params).filter(([key,value])=>key!=="page"&&key!=="sort"&&queryKeys.includes(key)&&value).map(([key,value])=><input key={key} type="hidden" name={key} value={value}/>)}<label className="field">Sort by<select name="sort" aria-label="Sort jobs" defaultValue={params.sort||"relevance"}><option value="relevance">Recommended</option><option value="date">Most recent</option></select></label><button className="btn outline sm">Sort</button></form></div>
+      {failed&&<div className="err">Jobs could not be loaded. Refresh the page or try again shortly.</div>}
+      {!failed&&jobs.length===0&&<div className="card emptyState"><h2>No jobs found</h2><p className="muted">Try a broader title, location or filter selection.</p><Link className="btn outline" href="/jobs">Clear search</Link></div>}
+      <div className="jobResultList">{jobs.map(job=><article className="card resultJob" key={job.id}><div className="resultJobTop"><div className="companyMark" aria-hidden="true">{job.company.trim().slice(0,1).toUpperCase()}</div><div className="resultJobInfo"><Link className="resultJobTitle" href={`/job/${job.id}`}>{job.title}</Link><p>{job.company}{job.verified&&<span className="verifiedMark">Verified employer</span>}</p></div></div><div className="resultJobMeta"><span>{job.location}</span>{expLabel(job)&&<span>{expLabel(job)}</span>}{job.employmentType&&<span>{job.employmentType.replaceAll("_"," ")}</span>}{job.workplaceType&&<span>{job.workplaceType.replaceAll("_"," ")}</span>}{salaryLabel(job)!=="Not disclosed"&&<span>{salaryLabel(job)}</span>}{job.createdAt&&<span>Posted {new Date(job.createdAt).toLocaleDateString("en-IN")}</span>}</div>{job.skills&&job.skills.length>0&&<div className="homeSkillList">{job.skills.slice(0,5).map(skill=><span key={`${job.id}-${skill.name}`}>{skill.name}</span>)}</div>}<div className="resultJobActions"><Link className="btn outline sm" href={`/job/${job.id}`}>View details</Link><SaveJobButton jobId={job.id}/><ApplyButton jobId={job.id}/></div></article>)}</div>
+      {pageCount>1&&<nav className="pagination" aria-label="Job search pages">{page>1&&<Link className="btn outline sm" href={pageUrl(page-1)}>Previous</Link>}<span>Page {page} of {pageCount}</span>{page<pageCount&&<Link className="btn outline sm" href={pageUrl(page+1)}>Next</Link>}</nav>}
+    </section></div></main></Page>;
 }
