@@ -40,6 +40,8 @@ The bootstrap command refuses to create another admin if one already exists.
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) and [docs/PHASE-STATUS.md](docs/PHASE-STATUS.md). Docker Compose is included as a starting deployment setup.
 
+For the Render Blueprint, GitHub branch protection, and outstanding launch gates, see [docs/PRODUCTION-RELEASE.md](docs/PRODUCTION-RELEASE.md).
+
 The current schema and verified relationship boundaries are documented in [docs/database-architecture.md](docs/database-architecture.md). The development catalog seed adds standard plan records and refuses to run in production. It does not create user accounts. Bootstrap an initial administrator with the guarded `admin:create` command described above.
 
 ## Provider-independent development mode
