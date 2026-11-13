@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Page } from "@/components/SiteChrome";
+import { DashboardShell } from "@/components/DashboardShell";
 import { api } from "@/lib/api";
 
 export default function CandidateDashboard() {
@@ -18,7 +19,7 @@ export default function CandidateDashboard() {
         const failed=[apps,saved,jobs].find((result)=>!result.ok); if(failed)setError(failed.data.error||"Some dashboard information could not be loaded. Refresh to try again.");
       }).catch(()=>setError("Could not reach the server while loading your dashboard. Refresh to try again."));
   }, []);
-  return <Page><main className="wrap section">
+  return <Page><DashboardShell role="candidate"><main className="wrap section">
     <div className="sectionTitle"><div><p className="eyebrow">CANDIDATE WORKSPACE</p><h1>Welcome{candidate?.user?.fullName ? `, ${candidate.user.fullName}` : ""}</h1></div><Link className="btn outline" href="/account/security">Security &amp; privacy</Link></div>
     {error && <div className="err">{error} {error.toLowerCase().includes("sign in")&&<Link href="/login">Sign in</Link>}</div>}
     {!candidate && !error && <p className="muted">Loading your dashboard…</p>}
@@ -37,5 +38,5 @@ export default function CandidateDashboard() {
         <p className="muted candidateMatchNote">Fit scores are profile signals to help you discover roles; they do not predict hiring outcomes.</p>
       </section>
     </>}
-  </main></Page>;
+  </main></DashboardShell></Page>;
 }

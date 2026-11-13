@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Page } from "@/components/SiteChrome";
 import { api } from "@/lib/api";
 
-type Job = { id:string; title:string; description:string; location:string; category:string|null; employmentType:string|null; experienceMin:number|null; experienceMax:number|null; salaryMin:number|null; salaryMax:number|null; status:string; _count:{applications:number} };
+type Job = { id:string; title:string; description:string; location:string; category:string|null; employmentType:string|null; experienceMin:number|null; experienceMax:number|null; salaryMin:number|null; salaryMax:number|null; status:string; draft?:{currentStep:number}|null; _count:{applications:number} };
 export default function RecruiterJobs() {
   const [jobs, setJobs] = useState<Job[]>([]); const [editing, setEditing] = useState<Job|null>(null); const [error, setError] = useState(""); const [message, setMessage] = useState(""); const [busy, setBusy] = useState("");
   const refresh = () => api<{data:Job[]}>("/api/v1/jobs/mine").then((r) => r.ok ? setJobs(r.data.data) : setError(r.data.error || "Sign in as a recruiter to manage jobs."));
@@ -45,6 +45,7 @@ export default function RecruiterJobs() {
         {job.status !== "CLOSED" && <button className="btn outline sm" onClick={() => { setEditing(job); setMessage(""); }}>Edit</button>}
         {job.status === "PUBLISHED" && <button className="btn outline sm" disabled={busy === job.id} onClick={() => status(job,"PAUSED")}>Pause</button>}
         {job.status === "PAUSED" && <button className="btn outline sm" disabled={busy === job.id} onClick={() => status(job,"PENDING_REVIEW")}>Resume &amp; review</button>}
+        {["CHANGES_REQUESTED", "REJECTED"].includes(job.status) && job.draft && <Link className="btn sm" href={`/recruiter/jobs/new?draft=${job.id}`}>Edit &amp; resubmit</Link>}
         {(["EXPIRED", "CLOSED", "PAUSED"].includes(job.status)) && <button className="btn outline sm" disabled={busy === job.id} onClick={() => jobAction(job,"renew")}>Renew</button>}
         <button className="btn outline sm" disabled={busy === job.id} onClick={() => jobAction(job,"duplicate")}>Duplicate</button>
         {job.status !== "CLOSED" && <button className="btn outline sm danger" disabled={busy === job.id} onClick={() => status(job,"CLOSED")}>Close job</button>}
