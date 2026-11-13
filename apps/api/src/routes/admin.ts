@@ -8,6 +8,7 @@ import { callCustomAi, customAiStatus, encryptApiKey } from "../integrations/cus
 import { getPaymentProvider } from "../integrations/registry";
 import { getJobPostingPolicy, JOB_POSTING_POLICY_KEY, jobPostingPolicySchema } from "../platform/job-posting-policy";
 import { notifyUser } from "../notifications/service";
+import { sanitizeJobDescriptionHtml } from "../security/job-description";
 
 export const adminRouter = Router();
 export const cmsRouter = Router();
@@ -404,7 +405,7 @@ adminRouter.patch("/users/:id/status", permission("MANAGE_USERS"), async (req,re
 });
 adminRouter.get("/jobs", permission("MODERATE_JOBS"), async (_req,res) => {
   const data=await prisma.job.findMany({where:{status:{in:["PENDING_REVIEW","PENDING_APPROVAL"]}},include:{employer:{select:{name:true,verified:true,userId:true,user:{select:{fullName:true,email:true}}}},skills:true,requirements:true,benefits:true,statusHistory:{orderBy:{createdAt:"desc"},take:5}},orderBy:{createdAt:"asc"}});
-  res.json({data});
+  res.json({data:data.map(job=>({...job,jobOverview:sanitizeJobDescriptionHtml(job.jobOverview||job.description)}))});
 });
 adminRouter.get("/institutions", permission("MANAGE_INSTITUTIONS"), async (_req, res) => {
   const data = await prisma.institution.findMany({ include: { user: { select: { email: true, fullName: true } }, _count: { select: { students: true } } }, orderBy: [{ verified: "asc" }, { name: "asc" }] });

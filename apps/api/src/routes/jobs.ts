@@ -6,6 +6,7 @@ import { prisma, Prisma } from "@jobinfo/database";
 import { requireAuth, userOf } from "../auth";
 import { scoreJobForCandidate } from "../recommendations/job-match";
 import { getJobPostingPolicy } from "../platform/job-posting-policy";
+import { jobDescriptionPlainText, sanitizeJobDescriptionHtml, sanitizeJobDraftData } from "../security/job-description";
 
 export const jobsRouter = Router();
 
@@ -22,9 +23,10 @@ jobsRouter.post("/drafts", requireAuth("RECRUITER"), async (req, res) => {
   if (!p.success) return res.status(400).json({ error: "Invalid draft" });
   const employer = await prisma.employer.findUnique({ where: { userId: userOf(req).id }, select: { id: true } });
   if (!employer) return res.status(404).json({ error: "Recruiter company profile not found" });
+  const draftData = sanitizeJobDraftData(p.data.data);
   const draft = await prisma.job.create({ data: {
     employerId: employer.id, title: "Untitled job", description: "Draft job description", location: "India", status: "DRAFT", jobReference: makeReference(),
-    draft: { create: { ownerId: userOf(req).id, currentStep: p.data.currentStep, data: p.data.data as Prisma.InputJsonValue } },
+    draft: { create: { ownerId: userOf(req).id, currentStep: p.data.currentStep, data: draftData as Prisma.InputJsonValue } },
     statusHistory: { create: { newStatus: "DRAFT", changedById: userOf(req).id, reason: "Draft created" } },
   }, include: { draft: true } });
   res.status(201).json({ draft: draft.draft, jobId: draft.id, jobReference: draft.jobReference });
@@ -33,7 +35,7 @@ jobsRouter.post("/drafts", requireAuth("RECRUITER"), async (req, res) => {
 jobsRouter.get("/drafts/:id", requireAuth("RECRUITER"), async (req, res) => {
   const draft = await prisma.recruiterJobDraft.findFirst({ where: { jobId: String(req.params.id), ownerId: userOf(req).id }, include: { job: { select: { id: true, jobReference: true, status: true } } } });
   if (!draft) return res.status(404).json({ error: "Draft not found" });
-  res.json({ draft });
+  res.json({ draft: { ...draft, data: sanitizeJobDraftData(draft.data as Record<string, unknown>) } });
 });
 
 jobsRouter.patch("/drafts/:id", requireAuth("RECRUITER"), async (req, res) => {
@@ -42,8 +44,9 @@ jobsRouter.patch("/drafts/:id", requireAuth("RECRUITER"), async (req, res) => {
   const prior = await prisma.recruiterJobDraft.findFirst({ where: { jobId: String(req.params.id), ownerId: userOf(req).id } });
   if (!prior) return res.status(404).json({ error: "Draft not found" });
   if (p.data.expectedVersion != null && p.data.expectedVersion !== prior.version) return res.status(409).json({ error: "This draft changed in another session. Reload it before saving." });
+  const draftData = sanitizeJobDraftData(p.data.data);
   const draft = await prisma.$transaction(async (tx) => {
-    const updated = await tx.recruiterJobDraft.update({ where: { id: prior.id }, data: { data: p.data.data as Prisma.InputJsonValue, currentStep: p.data.currentStep, version: { increment: 1 } } });
+    const updated = await tx.recruiterJobDraft.update({ where: { id: prior.id }, data: { data: draftData as Prisma.InputJsonValue, currentStep: p.data.currentStep, version: { increment: 1 } } });
     await tx.job.update({ where: { id: prior.jobId }, data: { updatedAt: new Date() } });
     return updated;
   });
@@ -53,7 +56,7 @@ jobsRouter.patch("/drafts/:id", requireAuth("RECRUITER"), async (req, res) => {
 const postingSchema = z.object({
   basic: z.object({ title:z.string().trim().min(3).max(150), companyName:z.string().trim().min(2).max(150), department:z.string().trim().min(2).max(100), category:z.string().trim().min(2).max(100), jobFunction:z.string().trim().max(100).optional(), employmentType:z.string().min(1).default("FULL_TIME"), experienceLevel:z.string().min(1).default("MID_LEVEL"), experienceMin:z.number().int().min(0).max(50).default(0), experienceMax:z.number().int().min(0).max(50).default(50), openings:z.number().int().min(1).max(100000).default(1) }).refine(x => x.experienceMax >= x.experienceMin, { message:"Maximum experience must be at least the minimum" }),
   workplace: z.object({ workplaceType:z.enum(["ON_SITE","REMOTE","HYBRID"]), country:z.string().trim().min(2).max(80), state:z.string().trim().max(80).optional(), city:z.string().trim().max(100).optional(), officeAddress:z.string().trim().max(300).optional(), remoteEligibility:z.string().max(200).optional(), relocationAssistance:z.boolean().default(false), travelRequirement:z.string().max(200).optional() }).superRefine((x,ctx)=>{ if(x.workplaceType!=="REMOTE"&&(!x.city||!x.state))ctx.addIssue({code:z.ZodIssueCode.custom,message:"Add a city and state for on-site or hybrid work",path:["city"]}); if(x.workplaceType==="REMOTE"&&!x.remoteEligibility)ctx.addIssue({code:z.ZodIssueCode.custom,message:"Choose where remote candidates may work",path:["remoteEligibility"]}); }),
-  description:z.object({ aboutCompany:z.string().max(5000).optional(), overview:z.string().trim().min(20).max(10000), responsibilities:z.string().max(15000).default(""), requiredQualifications:z.string().max(10000).default(""), preferredQualifications:z.string().max(10000).optional(), technicalRequirements:z.string().max(10000).optional(), benefitsAndPerks:z.string().max(10000).optional(), equalOpportunityStatement:z.string().max(3000).optional() }),
+  description:z.object({ aboutCompany:z.string().max(5000).optional(), overview:z.string().max(50000), responsibilities:z.string().max(15000).default(""), requiredQualifications:z.string().max(10000).default(""), preferredQualifications:z.string().max(10000).optional(), technicalRequirements:z.string().max(10000).optional(), benefitsAndPerks:z.string().max(10000).optional(), equalOpportunityStatement:z.string().max(3000).optional() }),
   skills:z.object({ required:z.array(z.string().trim().min(1).max(80)).max(50).default([]), preferred:z.array(z.string().trim().min(1).max(80)).max(50).default([]), technical:z.array(z.string().trim().min(1).max(80)).max(50).default([]), soft:z.array(z.string().trim().min(1).max(80)).max(50).default([]), education:z.array(z.object({name:z.string().trim().min(1).max(150),minimum:z.string().max(100).optional(),preferred:z.boolean().default(false)})).max(20).default([]), certifications:z.array(z.string().trim().min(1).max(150)).max(30).default([]), languages:z.array(z.string().trim().min(1).max(80)).max(30).default([]), specialization:z.string().max(150).optional() }),
   compensation:z.object({ minimum:z.number().int().min(0).nullable(), maximum:z.number().int().min(0).nullable(), currency:z.string().length(3).default("INR"), period:z.enum(["HOURLY","DAILY","MONTHLY","ANNUAL"]), disclose:z.boolean(), incentives:z.string().max(2000).optional(), bonus:z.string().max(2000).optional(), benefits:z.array(z.string().max(100)).max(30), otherBenefits:z.string().max(1000).optional() }).refine(x=>x.minimum==null||x.maximum==null||x.maximum>=x.minimum,{message:"Minimum salary cannot exceed maximum salary"}),
   application:z.object({ method:z.enum(["INTERNAL","EXTERNAL","COMPANY_SITE"]), externalUrl:z.string().url().optional().or(z.literal("")), deadline:z.string().optional(), resumeRequired:z.boolean(), coverLetterRequired:z.boolean(), allowUpdates:z.boolean(), collectAdditionalInformation:z.boolean(), confirmationEmail:z.boolean(), maxApplications:z.number().int().positive().max(100000).nullable() }).superRefine((x,ctx)=>{if(x.method!=="INTERNAL"&&!x.externalUrl)ctx.addIssue({code:z.ZodIssueCode.custom,message:"Add the external application URL",path:["externalUrl"]});}),
@@ -138,11 +141,15 @@ if(process.env.NODE_ENV!=="production")jobsRouter.post("/:id/payment/dev-confirm
 
 jobsRouter.post("/:id/submit-approval",requireAuth("RECRUITER"),async(req,res)=>{
   const draft=await prisma.recruiterJobDraft.findFirst({where:{jobId:String(req.params.id),ownerId:userOf(req).id},include:{job:true}});
-  if(!draft||draft.job.status!=="DRAFT")return res.status(404).json({error:"Draft not found"});
-  const savedData=draft.data as Record<string,unknown>;
+  if(!draft)return res.status(404).json({error:"Draft not found"});
+  if(!["DRAFT","CHANGES_REQUESTED","REJECTED"].includes(draft.job.status))return res.status(409).json({error:"This job is not a draft or awaiting recruiter changes"});
+  const previousStatus=draft.job.status;
+  const savedData=sanitizeJobDraftData(draft.data as Record<string,unknown>);
   const parsed=postingSchema.safeParse({...savedData,planCode:typeof savedData.planCode==="string"&&savedData.planCode?savedData.planCode:"FREE_JOB"});
   if(!parsed.success)return res.status(400).json({error:parsed.error.issues[0].message,issues:parsed.error.issues.map(x=>({path:x.path,message:x.message}))});
   const data=parsed.data;
+  const sanitizedOverview=sanitizeJobDescriptionHtml(data.description.overview);
+  if(jobDescriptionPlainText(sanitizedOverview).length<20)return res.status(400).json({error:"Add a job overview of at least 20 characters."});
   const policy=await getJobPostingPolicy();
   if(!policy.enabled)return res.status(403).json({error:"Job posting is currently disabled by the platform administrator"});
   const employer=await prisma.employer.findUnique({where:{userId:userOf(req).id}});
@@ -174,7 +181,7 @@ jobsRouter.post("/:id/submit-approval",requireAuth("RECRUITER"),async(req,res)=>
     if(postsThisMonth>=limits.jobPostsPerMonth)return res.status(403).json({error:`Your subscription's monthly job post limit is ${limits.jobPostsPerMonth}.`});
   }
   const location=[data.workplace.city,data.workplace.state,data.workplace.country].filter(Boolean).join(", ");
-  const description=Object.entries({"About the Company":data.description.aboutCompany,"Job Overview":data.description.overview,"Key Responsibilities":data.description.responsibilities,"Required Qualifications":data.description.requiredQualifications,"Preferred Qualifications":data.description.preferredQualifications,"Technical Requirements":data.description.technicalRequirements,"Benefits and Perks":data.description.benefitsAndPerks,"Equal Opportunity":data.description.equalOpportunityStatement}).filter(([,v])=>v).map(([heading,value])=>`${heading}\n${value}`).join("\n\n");
+  const description=Object.entries({"About the Company":data.description.aboutCompany,"Job Overview":jobDescriptionPlainText(sanitizedOverview),"Key Responsibilities":data.description.responsibilities,"Required Qualifications":data.description.requiredQualifications,"Preferred Qualifications":data.description.preferredQualifications,"Technical Requirements":data.description.technicalRequirements,"Benefits and Perks":data.description.benefitsAndPerks,"Equal Opportunity":data.description.equalOpportunityStatement}).filter(([,v])=>v).map(([heading,value])=>`${heading}\n${value}`).join("\n\n");
   const requiredSkills=[...new Set(data.skills.required.map(x=>x.trim()))];
   const skills=[...requiredSkills.map(name=>({name,kind:"REQUIRED"})),...data.skills.preferred.map(name=>({name,kind:"PREFERRED"})),...data.skills.technical.map(name=>({name,kind:"TECHNICAL"})),...data.skills.soft.map(name=>({name,kind:"SOFT"}))];
   const requirements=[...data.skills.education.map(x=>({kind:"EDUCATION",name:x.name,minimum:x.minimum||null,preferred:x.preferred})),...data.skills.certifications.map(name=>({kind:"CERTIFICATION",name,minimum:null,preferred:false})),...data.skills.languages.map(name=>({kind:"LANGUAGE",name,minimum:null,preferred:false}))];
@@ -186,7 +193,7 @@ jobsRouter.post("/:id/submit-approval",requireAuth("RECRUITER"),async(req,res)=>
       title:data.basic.title,description,location,category:data.basic.category,employmentType:data.basic.employmentType,experienceMin:data.basic.experienceMin,experienceMax:data.basic.experienceMax,
       department:data.basic.department,jobFunction:data.basic.jobFunction,experienceLevel:data.basic.experienceLevel,openings:data.basic.openings,
       workplaceType:data.workplace.workplaceType,country:data.workplace.country,state:data.workplace.state||null,city:data.workplace.city||null,officeAddress:data.workplace.officeAddress||null,remoteEligibility:data.workplace.remoteEligibility||null,relocationAssistance:data.workplace.relocationAssistance,travelRequirement:data.workplace.travelRequirement||null,
-      aboutCompany:data.description.aboutCompany||null,jobOverview:data.description.overview,responsibilities:data.description.responsibilities,requiredQualifications:data.description.requiredQualifications,preferredQualifications:data.description.preferredQualifications||null,technicalRequirements:data.description.technicalRequirements||null,benefitsAndPerks:data.description.benefitsAndPerks||null,equalOpportunityStatement:data.description.equalOpportunityStatement||null,
+      aboutCompany:data.description.aboutCompany||null,jobOverview:sanitizedOverview,responsibilities:data.description.responsibilities,requiredQualifications:data.description.requiredQualifications,preferredQualifications:data.description.preferredQualifications||null,technicalRequirements:data.description.technicalRequirements||null,benefitsAndPerks:data.description.benefitsAndPerks||null,equalOpportunityStatement:data.description.equalOpportunityStatement||null,
       salaryMin:data.compensation.disclose?data.compensation.minimum:null,salaryMax:data.compensation.disclose?data.compensation.maximum:null,salaryCurrency:data.compensation.currency,salaryPeriod:data.compensation.period,salaryDisclosure:data.compensation.disclose,incentives:data.compensation.incentives||null,bonus:data.compensation.bonus||null,
       applicationMethod:data.application.method,externalApplyUrl:data.application.externalUrl||null,applicationDeadline:deadline,resumeRequired:data.application.resumeRequired,coverLetterRequired:data.application.coverLetterRequired,allowApplicationUpdates:data.application.allowUpdates,collectAdditionalInformation:data.application.collectAdditionalInformation,confirmationEmail:data.application.confirmationEmail,maxApplications:data.application.maxApplications,
       urgentHiring:data.preferences.urgent,immediateJoining:data.preferences.immediateJoining,backgroundVerification:data.preferences.backgroundVerification,workAuthorization:data.preferences.workAuthorization||null,interviewRounds:data.preferences.interviewRounds,expectedJoiningDate,visibility:data.preferences.visibility,postingPlanCode:data.planCode,status:policy.requireApproval?"PENDING_APPROVAL":"PUBLISHED",...(policy.requireApproval?{}:{publishedAt:new Date(),expiresAt:new Date(Date.now()+policy.expiryDays*86400000)}),
@@ -204,7 +211,7 @@ jobsRouter.post("/:id/submit-approval",requireAuth("RECRUITER"),async(req,res)=>
       if (teammates.length) await tx.jobTeamMember.createMany({ data: teammates.map((member) => ({ jobId: job.id, userId: member.id, permissions: data.team.members.find((x) => x.email.trim().toLowerCase() === member.email)?.permissions || ["VIEW_JOB"] })), skipDuplicates: true });
     }
     const nextStatus=policy.requireApproval?"PENDING_APPROVAL":"PUBLISHED";
-    await tx.jobStatusHistory.create({data:{jobId:job.id,previousStatus:"DRAFT",newStatus:nextStatus,changedById:userOf(req).id,reason:policy.requireApproval?"Submitted for moderation":"Published under platform job posting policy"}});
+    await tx.jobStatusHistory.create({data:{jobId:job.id,previousStatus,newStatus:nextStatus,changedById:userOf(req).id,reason:previousStatus==="DRAFT"?(policy.requireApproval?"Submitted for moderation":"Published under platform job posting policy"):"Recruiter resubmitted requested changes"}});
     await tx.auditLog.create({data:{actorId:userOf(req).id,action:policy.requireApproval?"JOB_SUBMITTED_FOR_APPROVAL":"JOB_PUBLISHED_BY_POLICY",entityType:"Job",entityId:job.id,metadata:{jobReference:job.jobReference,planCode:data.planCode}}});
     return job;
   });
@@ -331,7 +338,7 @@ jobsRouter.get("/recommendations", requireAuth("CANDIDATE"), async (req, res) =>
 jobsRouter.get("/mine", requireAuth("RECRUITER"), async (req, res) => {
   const employer = await prisma.employer.findUnique({ where: { userId: userOf(req).id }, select: { id: true } });
   if (!employer) return res.status(404).json({ error: "Recruiter profile not found" });
-  const data = await prisma.job.findMany({ where: { employerId: employer.id }, orderBy: { createdAt: "desc" }, include: { _count: { select: { applications: true } } } });
+  const data = await prisma.job.findMany({ where: { employerId: employer.id }, orderBy: { createdAt: "desc" }, include: { _count: { select: { applications: true } }, draft: { select: { currentStep: true } } } });
   res.json({ data });
 });
 
@@ -386,6 +393,7 @@ jobsRouter.post("/:id/duplicate", requireAuth("RECRUITER"), async (req, res) => 
   const employer = await prisma.employer.findUnique({ where: { userId: userOf(req).id }, select: { id: true } });
   const source = await prisma.job.findFirst({ where: { id: String(req.params.id), employerId: employer?.id }, include: { skills: true, requirements: true, benefits: true, screeningQuestions: { include: { options: true } }, applicationSetting: true, employer: { select: { name: true } } } });
   if (!source) return res.status(404).json({ error: "Job not found" });
+  const safeOverview = sanitizeJobDescriptionHtml(source.jobOverview || source.description);
   const job = await prisma.job.create({ data: {
     employerId: source.employerId, title: `${source.title} (copy)`, description: source.description,
     location: source.location, category: source.category, employmentType: source.employmentType,
@@ -393,7 +401,7 @@ jobsRouter.post("/:id/duplicate", requireAuth("RECRUITER"), async (req, res) => 
     salaryMax: source.salaryMax, department: source.department, jobFunction: source.jobFunction,
     experienceLevel: source.experienceLevel, openings: source.openings, workplaceType: source.workplaceType,
     country: source.country, state: source.state, city: source.city, officeAddress: source.officeAddress,
-    remoteEligibility: source.remoteEligibility, aboutCompany: source.aboutCompany, jobOverview: source.jobOverview,
+    remoteEligibility: source.remoteEligibility, aboutCompany: source.aboutCompany, jobOverview: safeOverview,
     responsibilities: source.responsibilities, requiredQualifications: source.requiredQualifications,
     preferredQualifications: source.preferredQualifications, technicalRequirements: source.technicalRequirements,
     benefitsAndPerks: source.benefitsAndPerks, salaryCurrency: source.salaryCurrency, salaryPeriod: source.salaryPeriod,
@@ -405,7 +413,7 @@ jobsRouter.post("/:id/duplicate", requireAuth("RECRUITER"), async (req, res) => 
   await prisma.recruiterJobDraft.create({ data: { jobId: job.id, ownerId: userOf(req).id, currentStep: 1, data: {
     basic: { title: `${source.title} (copy)`, companyName: source.employer.name, department: source.department || "", category: source.category || "", jobFunction: source.jobFunction || "", employmentType: source.employmentType || "FULL_TIME", experienceLevel: source.experienceLevel || "MID_LEVEL", experienceMin: source.experienceMin ?? 0, experienceMax: source.experienceMax ?? 0, openings: source.openings },
     workplace: { workplaceType: source.workplaceType || "ON_SITE", country: source.country || "India", state: source.state || "", city: source.city || "", officeAddress: source.officeAddress || "", remoteEligibility: source.remoteEligibility || "", relocationAssistance: source.relocationAssistance, travelRequirement: source.travelRequirement || "" },
-    description: { aboutCompany: source.aboutCompany || "", overview: source.jobOverview || source.description, responsibilities: source.responsibilities || source.description, requiredQualifications: source.requiredQualifications || source.description, preferredQualifications: source.preferredQualifications || "", technicalRequirements: source.technicalRequirements || "", benefitsAndPerks: source.benefitsAndPerks || "", equalOpportunityStatement: source.equalOpportunityStatement || "" },
+    description: { aboutCompany: source.aboutCompany || "", overview: safeOverview, responsibilities: source.responsibilities || source.description, requiredQualifications: source.requiredQualifications || source.description, preferredQualifications: source.preferredQualifications || "", technicalRequirements: source.technicalRequirements || "", benefitsAndPerks: source.benefitsAndPerks || "", equalOpportunityStatement: source.equalOpportunityStatement || "" },
     skills: { required: source.skills.filter((x) => x.kind === "REQUIRED").map((x) => x.name), preferred: source.skills.filter((x) => x.kind === "PREFERRED").map((x) => x.name), technical: source.skills.filter((x) => x.kind === "TECHNICAL").map((x) => x.name), soft: source.skills.filter((x) => x.kind === "SOFT").map((x) => x.name), education: source.requirements.filter((x) => x.kind === "EDUCATION").map((x) => ({ name: x.name, minimum: x.minimum || "", preferred: x.preferred })), certifications: source.requirements.filter((x) => x.kind === "CERTIFICATION").map((x) => x.name), languages: source.requirements.filter((x) => x.kind === "LANGUAGE").map((x) => x.name), specialization: "" },
     compensation: { minimum: source.salaryMin, maximum: source.salaryMax, currency: source.salaryCurrency, period: source.salaryPeriod, disclose: source.salaryDisclosure, incentives: source.incentives || "", bonus: source.bonus || "", benefits: source.benefits.map((x) => x.name), otherBenefits: "" },
     application: { method: source.applicationMethod, externalUrl: source.externalApplyUrl || "", deadline: "", resumeRequired: source.resumeRequired, coverLetterRequired: source.coverLetterRequired, allowUpdates: source.allowApplicationUpdates, collectAdditionalInformation: source.collectAdditionalInformation, confirmationEmail: source.confirmationEmail, maxApplications: source.maxApplications },
@@ -440,6 +448,6 @@ jobsRouter.post("/:id/renew", requireAuth("RECRUITER"), async (req, res) => {
 jobsRouter.get("/:id", async (req, res) => {
   const job = await prisma.job.findFirst({ where: { id: String(req.params.id), status: "PUBLISHED", visibility:"PUBLIC", AND:[{OR:[{expiresAt:null},{expiresAt:{gt:new Date()}}]}] }, include: { employer: { select: { name: true, verified: true, city: true, state:true, industry:true } }, skills:{orderBy:{name:"asc"}}, requirements:{orderBy:{name:"asc"}}, benefits:{orderBy:{name:"asc"}} } });
   if (!job) return res.status(404).json({ error: "Job not found" });
-  res.json({ job });
+  res.json({ job: { ...job, jobOverview: sanitizeJobDescriptionHtml(job.jobOverview || job.description) } });
 });
 

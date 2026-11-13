@@ -12,6 +12,20 @@ small{font-size:11px;color:var(--muted)}
 
 /* header */
 .topbar{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+.dashboardShell{display:grid;grid-template-columns:255px minmax(0,1fr);min-height:calc(100vh - 72px);background:#fff}
+.dashboardSidebar{position:sticky;top:72px;align-self:start;height:calc(100vh - 72px);overflow-y:auto;border-right:1px solid var(--line);padding:22px 14px;display:flex;flex-direction:column;background:#fff}
+.dashboardSidebarTitle{margin:0 10px 14px;color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.1em}
+.dashboardSidebar nav{display:grid;gap:4px}
+.dashboardNavLink,.dashboardLogout{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;color:#1e293b;font-size:13px;font-weight:550;text-decoration:none}
+.dashboardNavLink span{color:#64748b;font-size:18px;line-height:1}
+.dashboardNavLink:hover,.dashboardNavLink.active{background:#eaf2ff;color:var(--blue)}
+.dashboardNavLink.active{font-weight:700}
+.dashboardLogout{margin-top:auto;border-top:1px solid var(--line);border-radius:0;color:#475569;padding-top:16px}
+.dashboardMain{min-width:0;overflow-x:hidden}
+.dashboardMain>.wrap{max-width:1240px;padding-top:28px}
+.dashboardMain section[id]{scroll-margin-top:100px}
+@media(max-width:850px){.dashboardShell{grid-template-columns:220px minmax(0,1fr)}.dashboardSidebar{padding:18px 10px}.dashboardMain>.wrap{padding-top:22px}}
+@media(max-width:680px){.dashboardShell{grid-template-columns:minmax(0,1fr)}.dashboardSidebar{position:relative;top:auto;height:auto;overflow:visible;border-right:0;border-bottom:1px solid var(--line);padding:10px 14px}.dashboardSidebarTitle,.dashboardLogout{display:none}.dashboardSidebar nav{display:flex;gap:6px;overflow-x:auto;padding:2px 0 5px;scrollbar-width:thin}.dashboardNavLink{flex:0 0 auto;padding:9px 11px;white-space:nowrap;font-size:12px}.dashboardNavLink span{display:none}.dashboardMain>.wrap{padding-top:18px}}
 .backNavigation{padding-top:10px;padding-bottom:0}
 .backButton{display:inline-flex;align-items:center;gap:7px;border:0;background:transparent;color:#475569;font:inherit;font-size:13px;font-weight:600;padding:6px 0;cursor:pointer}
 .backButton:hover{color:var(--blue)}
@@ -267,6 +281,31 @@ small{font-size:11px;color:var(--muted)}
 .wizardSteps small{display:block;margin-top:12px;color:var(--muted);font-size:11px}
 .wizardCopyLink{border:0;background:transparent;color:var(--blue);cursor:pointer;padding:0;font:inherit}
 .wizardPanel{padding:24px;min-width:0}
+.postingProgress{height:6px;background:#e2e8f0;border-radius:999px;overflow:hidden;margin:4px 0 20px}
+.postingProgress span{display:block;height:100%;background:var(--blue);border-radius:inherit;transition:width .2s ease}
+.jobDescriptionField>label{display:block;margin-bottom:6px;font-size:13px;font-weight:650;color:#334155}
+.jobDescriptionEditor{border:1px solid #cbd5e1;border-radius:9px;overflow:hidden;background:#fff}
+.jobDescriptionToolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px;border-bottom:1px solid var(--line);background:#f8fafc}
+.editorToolGroup{display:flex;align-items:center;gap:3px;padding-right:6px;border-right:1px solid #cbd5e1}
+.editorToolGroup:last-child{padding-right:0;border-right:0}
+.editorToolButton{min-height:32px;padding:5px 8px;border:1px solid transparent;border-radius:5px;background:transparent;color:#334155;font-family:inherit;font-size:12px;font-weight:600;line-height:1.2;cursor:pointer}
+.editorToolButton:hover,.editorToolButton.isActive{border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8}
+.editorToolButton:disabled{opacity:.4;cursor:not-allowed}
+.editorSelectLabel,.editorColorLabel{display:flex;align-items:center;gap:4px;color:#475569;font-size:11px;white-space:nowrap}
+.editorSelectLabel select{max-width:120px;height:30px;padding:2px 5px;border:1px solid #cbd5e1;border-radius:5px;background:white;color:#334155;font:inherit}
+.editorColorLabel input{width:26px;height:26px;padding:2px;border:1px solid #cbd5e1;border-radius:5px;background:white;cursor:pointer}
+.jobDescriptionEditorArea{min-height:300px;padding:16px;outline:0;color:#1e293b;line-height:1.65;overflow-wrap:anywhere}
+.jobDescriptionEditorArea p{margin:0 0 10px}
+.jobDescriptionEditorArea p:last-child{margin-bottom:0}
+.jobDescriptionEditorArea ul,.jobDescriptionEditorArea ol{padding-left:26px}
+.jobDescriptionEditorArea p.is-editor-empty:first-child::before{content:attr(data-placeholder);float:left;height:0;color:#94a3b8;pointer-events:none}
+.jobDescriptionEditorLoading{height:300px;background:linear-gradient(90deg,#f8fafc,#fff,#f8fafc)}
+.jobPreviewRich,.jobRichContent{white-space:normal;line-height:1.7;overflow-wrap:anywhere}
+.jobPreviewRich>:first-child,.jobRichContent>:first-child{margin-top:0}
+.jobPreviewRich>:last-child,.jobRichContent>:last-child{margin-bottom:0}
+.jobPreviewRich ul,.jobPreviewRich ol,.jobRichContent ul,.jobRichContent ol{padding-left:24px}
+.jobRichContent a{color:var(--blue);text-decoration:underline}
+@media(max-width:650px){.jobDescriptionToolbar{gap:5px;padding:6px}.editorToolGroup{flex-wrap:wrap;padding-right:5px}.editorToolButton{padding:5px 6px;font-size:11px}.editorStyleGroup{max-width:100%}.editorSelectLabel select{max-width:100px}.jobDescriptionEditorArea{padding:12px}}
 .wizardPanelHead{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;border-bottom:1px solid var(--line);padding-bottom:16px;margin-bottom:20px}
 .wizardPanelHead h2{font-size:24px;margin:0}
 .wizardContent{display:grid;gap:16px}
